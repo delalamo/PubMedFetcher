@@ -13,7 +13,10 @@ load_dotenv()
 # SENDER_PASSWORD = os.environ.get("SENDER_PASSWORD")
 # RECEIVER_EMAIL = "123@test.com"
 
+sched = BlockingScheduler()
 
+
+@sched.scheduled_job("interval", minutes=1)
 def send_email():
     """Sends an email with the current time."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -31,9 +34,4 @@ def send_email():
         print(f"Error sending email: {e}")
 
 
-if __name__ == "__main__":
-    print("Hello from Heroku!")
-    scheduler = BlockingScheduler()
-    scheduler.add_job(send_email, "interval", minutes=1)
-    print("Press Ctrl+C to exit")
-    scheduler.start()
+sched.start()
