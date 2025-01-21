@@ -32,6 +32,7 @@ def send_email():
 
 
 if __name__ == "__main__":
+    print("Hello from Heroku!")
     scheduler = BlockingScheduler()
     scheduler.add_job(send_email, "interval", minutes=1)
     print("Press Ctrl+C to exit")
