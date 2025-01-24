@@ -1,9 +1,18 @@
-import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime
 import os
 from dotenv import load_dotenv
 from apscheduler.schedulers.blocking import BlockingScheduler
+
+import requests, os
+
+url = os.environ["TRUSTIFI_URL"] + "/api/i/v1/email"
+payload = '{"recipients":[{"email":"diego.delalamo@gmail.com"}],"title":"Title","html":"Body"}'
+headers = {
+    "x-trustifi-key": os.environ["TRUSTIFI_KEY"],
+    "x-trustifi-secret": os.environ["TRUSTIFI_SECRET"],
+    "Content-Type": "application/json",
+}
 
 # Load environment variables
 load_dotenv()
@@ -25,13 +34,9 @@ def send_email():
     # message["From"] = SENDER_EMAIL
     # message["To"] = RECEIVER_EMAIL
 
-    try:
-        # with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:  # Use your email provider's SMTP server
-        #     server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        #     server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, message.as_string())
-        print(f"Email sent successfully at {now}: {message}")
-    except Exception as e:
-        print(f"Error sending email: {e}")
+    print(message)
+    response = requests.request("POST", url, headers=headers, data=payload)
+    print(response.json())
 
 
 sched.start()
