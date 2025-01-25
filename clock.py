@@ -3,8 +3,10 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from apscheduler.schedulers.blocking import BlockingScheduler
+import requests
 
-import requests, os
+# from urllib2 import Request, urlopen
+import urllib.request
 
 url = os.environ["TRUSTIFI_URL"] + "/api/i/v1/email"
 payload = '{"recipients":[{"email":"diego.delalamo@gmail.com"}],"title":"Title","html":"Body"}'
@@ -30,13 +32,19 @@ def send_email():
     """Sends an email with the current time."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = MIMEText(f"The current time is: {now}")
-    # message["Subject"] = "Hourly Time Update"
-    # message["From"] = SENDER_EMAIL
-    # message["To"] = RECEIVER_EMAIL
 
-    print(message)
-    response = requests.request("POST", url, headers=headers, data=payload)
-    print(response.json())
+    request = urllib.request.Request(
+        "https://realemail.expeditedaddons.com/?api_key="
+        + os.environ["REALEMAIL_API_KEY"]
+        + "&email=diego.delalamo%40example.org&fix_typos=false"
+    )
+
+    response_body = urllib.request.urlopen(request).read()
+    print(response_body)
+
+    # print(message)
+    # response = requests.request("POST", url, headers=headers, data=payload)
+    # print(response.json())
 
 
 sched.start()
