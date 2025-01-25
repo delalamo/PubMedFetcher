@@ -28,7 +28,7 @@ def send_email():
     request = urllib.request.Request(
         "https://realemail.expeditedaddons.com/?api_key="
         + os.environ["REALEMAIL_API_KEY"]
-        + "&email=diego.delalamo%40example.org&fix_typos=false"
+        + "&email=diego.delalamo%40gmail.com&fix_typos=false"
     )
 
     response_body = urllib.request.urlopen(request).read()
