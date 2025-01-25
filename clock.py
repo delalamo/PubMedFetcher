@@ -8,14 +8,6 @@ import requests
 # from urllib2 import Request, urlopen
 import urllib.request
 
-url = os.environ["TRUSTIFI_URL"] + "/api/i/v1/email"
-payload = '{"recipients":[{"email":"diego.delalamo@gmail.com"}],"title":"Title","html":"Body"}'
-headers = {
-    "x-trustifi-key": os.environ["TRUSTIFI_KEY"],
-    "x-trustifi-secret": os.environ["TRUSTIFI_SECRET"],
-    "Content-Type": "application/json",
-}
-
 # Load environment variables
 load_dotenv()
 
