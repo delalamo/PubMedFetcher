@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import pickle
-from typing import List
+from typing import Dict, List, Tuple
 
 import smtplib
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -23,13 +23,30 @@ load_dotenv()
 sched = BlockingScheduler()
 
 
-def format_date(date, sep: str = "/"):
+def format_date(date, sep: str = "/") -> str:
+    """Formats a datetime object into a string.
+
+    Args:
+        date: The datetime object to format.
+        sep: The separator to use between year, month, and day.
+
+    Returns:
+        A string representation of the date in YYYY/MM/DD format.
+    """
     assert len(sep) == 1
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
-def embed_papers(data, cutoff=0.05):
+def embed_papers(data: Dict[str, List], cutoff=0.05) -> pd.DataFrame:
+    """Embeds papers using OpenAI's API and filters them by relevance.
 
+    Args:
+        data: A dictionary containing paper titles, abstracts, and journals.
+        cutoff: The minimum relevance score for a paper to be included.
+
+    Returns:
+        A Pandas DataFrame with relevant papers, sorted by relevance.
+    """
     with open("model_openai.pkl", "rb") as f:
         clf = pickle.load(f)
 
@@ -64,8 +81,15 @@ def embed_papers(data, cutoff=0.05):
     return df
 
 
-def scrape_arxiv(n_days):
+def scrape_arxiv(n_days: int) -> Dict[str, List]:
+    """Scrapes arXiv for papers in the q-bio category published in the last n_days.
 
+    Args:
+        n_days: The number of days to look back.
+
+    Returns:
+        A dictionary containing paper titles, abstracts, and journals.
+    """
     start = (
         str(datetime.now() - timedelta(days=n_days + 1)).split()[0].replace("/", "-")
     )
@@ -81,7 +105,15 @@ def scrape_arxiv(n_days):
     return data
 
 
-def scrape_biorxiv(n_days: int):
+def scrape_biorxiv(n_days: int) -> Dict[str, List]:
+    """Scrapes biorxiv, medrxiv, and chemrxiv for papers published in the last n_days.
+
+    Args:
+        n_days: The number of days to look back.
+
+    Returns:
+        A dictionary containing paper titles, abstracts, and journals.
+    """
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
     end_rxivs = datetime.now() - timedelta(days=1)
 
@@ -115,7 +147,15 @@ def scrape_biorxiv(n_days: int):
     return data
 
 
-def scrape_pubmed(n_days: int):
+def scrape_pubmed(n_days: int) -> Dict[str, List]:
+    """Scrapes PubMed for papers published in the last n_days.
+
+    Args:
+        n_days: The number of days to look back.
+
+    Returns:
+        A dictionary containing paper titles, abstracts, and journals.
+    """
     end = datetime.now() - timedelta(days=1)
     days = [format_date(end - timedelta(days=i + 1), "/") for i in range(n_days)]
 
@@ -142,7 +182,12 @@ def scrape_pubmed(n_days: int):
     return data
 
 
-def main(n_days):
+def main(n_days: int) -> None:
+    """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
+
+    Args:
+        n_days: The number of days to look back.
+    """
     data_pubmed = scrape_pubmed(n_days)
     data_biorxiv = scrape_biorxiv(n_days)
     data_arxiv = scrape_arxiv(n_days)
@@ -185,23 +230,17 @@ def main(n_days):
         )
 
 
-@sched.scheduled_job("interval", minutes=1)
-def send_email_test():
-    n_days = 3
-    main(n_days)
-
-
 @sched.scheduled_job("cron", day_of_week="mon", hour=6)
-def send_email_monday():
-    """Sends an email with the current time."""
+def send_email_monday() -> None:
+    """Sends an email with relevant papers on Mondays."""
 
     n_days = 3
     main(n_days)
 
 
 @sched.scheduled_job("cron", day_of_week="tue-fri", hour=6)
-def send_email_daily():
-    """Sends an email with the current time."""
+def send_email_daily() -> None:
+    """Sends an email with relevant papers Tuesday-Friday."""
 
     n_days = 1
     main(n_days)
