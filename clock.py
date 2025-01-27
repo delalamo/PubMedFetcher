@@ -230,7 +230,7 @@ def main(n_days: int) -> None:
         )
 
 
-@sched.scheduled_job("cron", day_of_week="mon", hour=6)
+@sched.scheduled_job("cron", day_of_week="mon", hour=8)
 def send_email_monday() -> None:
     """Sends an email with relevant papers on Mondays."""
 
@@ -238,7 +238,7 @@ def send_email_monday() -> None:
     main(n_days)
 
 
-@sched.scheduled_job("cron", day_of_week="tue-fri", hour=6)
+@sched.scheduled_job("cron", day_of_week="tue-fri", hour=8)
 def send_email_daily() -> None:
     """Sends an email with relevant papers Tuesday-Friday."""
 
