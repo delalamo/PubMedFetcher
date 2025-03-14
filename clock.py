@@ -247,3 +247,8 @@ def send_email_daily() -> None:
 
 
 sched.start()
+
+if __name__ == "__main__":
+    n_days = 1
+    main(n_days)
+
