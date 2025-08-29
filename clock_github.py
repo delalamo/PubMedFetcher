@@ -196,14 +196,16 @@ def main(n_days: int, test_mode: bool = False) -> None:
         n_days: The number of days to look back.
     """
 
-    if (
-        not os.environ.get("MY_EMAIL")
-        or not os.environ.get("MY_PW")
-        or not os.environ.get("OPENAI_KEY")
-    ):
-        raise ValueError(
-            "Please set the MY_EMAIL, MY_PW, and OPENAI_KEY environment variables."
-        )
+    env_vars_set = {
+        "MY_EMAIL": bool(os.environ.get("MY_EMAIL")),
+        "MY_PW": bool(os.environ.get("MY_PW")),
+        "OPENAI_KEY": bool(os.environ.get("OPENAI_KEY")),
+    }
+
+    if not all(env_vars_set.values()):
+        msg1 = "One or more environment variables are not set: "
+        msg2 = ", ".join([k for k, v in env_vars_set.items() if not v])
+        raise ValueError(msg1 + msg2)
 
     data_pubmed = scrape_pubmed(n_days)
     data_biorxiv = scrape_biorxiv(n_days)
