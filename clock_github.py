@@ -195,6 +195,16 @@ def main(n_days: int, test_mode: bool = False) -> None:
     Args:
         n_days: The number of days to look back.
     """
+
+    if (
+        not os.environ.get("MY_EMAIL")
+        or not os.environ.get("MY_PW")
+        or not os.environ.get("OPENAI_KEY")
+    ):
+        raise ValueError(
+            "Please set the MY_EMAIL, MY_PW, and OPENAI_KEY environment variables."
+        )
+
     data_pubmed = scrape_pubmed(n_days)
     data_biorxiv = scrape_biorxiv(n_days)
     data_arxiv = scrape_arxiv(n_days)
