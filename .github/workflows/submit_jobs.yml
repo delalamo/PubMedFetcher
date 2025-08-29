@@ -2,8 +2,8 @@ name: Run clock.py
 
 on:
   schedule:
-    # Runs every 5 minutes
-      - cron: "*/5 * * * *"
+    # Runs every 24 hours
+      - cron: "0 0 * * *"
   workflow_dispatch: # allows manual runs too
 
 jobs:
