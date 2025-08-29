@@ -90,6 +90,7 @@ def scrape_arxiv(n_days: int) -> Dict[str, List]:
     Returns:
         A dictionary containing paper titles, abstracts, and journals.
     """
+    print("Scraping arxiv")
     start = (
         str(datetime.now() - timedelta(days=n_days + 1)).split()[0].replace("/", "-")
     )
@@ -114,6 +115,7 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
     Returns:
         A dictionary containing paper titles, abstracts, and journals.
     """
+    print("Scraping biorxiv")
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
     end_rxivs = datetime.now() - timedelta(days=1)
 
@@ -156,6 +158,7 @@ def scrape_pubmed(n_days: int) -> Dict[str, List]:
     Returns:
         A dictionary containing paper titles, abstracts, and journals.
     """
+    print("Scraping pubmed")
     end = datetime.now() - timedelta(days=1)
     days = [format_date(end - timedelta(days=i + 1), "/") for i in range(n_days)]
 
@@ -194,6 +197,7 @@ def main(n_days: int) -> None:
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
+        n_titles = len(d["Title"])
         for field in data.keys():
             data[field].extend(d[field])
 
@@ -246,4 +250,7 @@ def send_email_daily() -> None:
     main(n_days)
 
 
-sched.start()
+if __name__ == "__main__":
+    # n_days = 1
+    # main(n_days)
+    sched.start()
