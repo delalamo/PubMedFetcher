@@ -250,7 +250,7 @@ def send_email_daily() -> None:
     main(n_days)
 
 
-sched.start()
+# sched.start()
 
 # this just sends emails nonstop
 # if __name__ == "__main__":
