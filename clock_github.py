@@ -37,7 +37,9 @@ def format_date(date, sep: str = "/") -> str:
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
-def embed_papers(data: Dict[str, List], cutoff=0.05) -> pd.DataFrame:
+def embed_papers(
+    data: Dict[str, List], cutoff=0.05, test_mode: bool = False
+) -> pd.DataFrame:
     """Embeds papers using OpenAI's API and filters them by relevance.
 
     Args:
@@ -75,6 +77,8 @@ def embed_papers(data: Dict[str, List], cutoff=0.05) -> pd.DataFrame:
                 analyzed_data["Journal"].append(p[2])
                 analyzed_data["Relevance"].append(prob)
             prompts = []
+        if test_mode and len(analyzed_data["Title"]) >= 2:
+            break
     df = pd.DataFrame.from_dict(analyzed_data)
     df = df.sort_values("Relevance", ascending=False)
     df = df[df["Relevance"] >= cutoff]
@@ -185,7 +189,7 @@ def scrape_pubmed(n_days: int) -> Dict[str, List]:
     return data
 
 
-def main(n_days: int) -> None:
+def main(n_days: int, test_mode: bool = False) -> None:
     """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
 
     Args:
@@ -201,7 +205,7 @@ def main(n_days: int) -> None:
         for field in data.keys():
             data[field].extend(d[field])
 
-    df = embed_papers(data)
+    df = embed_papers(data, test_mode=test_mode)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = MIMEText(f"The current time is: {now}")
@@ -239,7 +243,7 @@ def send_email_monday() -> None:
     """Sends an email with relevant papers on Mondays."""
 
     n_days = 3
-    main(n_days)
+    main(n_days, test_mode=False)
 
 
 @sched.scheduled_job("cron", day_of_week="tue-fri", hour=5)
@@ -247,10 +251,10 @@ def send_email_daily() -> None:
     """Sends an email with relevant papers Tuesday-Friday."""
 
     n_days = 1
-    main(n_days)
+    main(n_days, test_mode=False)
 
 
-sched.start()
+# sched.start()
 
 # this just sends emails nonstop
 # if __name__ == "__main__":
