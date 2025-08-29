@@ -1,9 +1,9 @@
-name: Run clock.py every 5 minutes
+name: Run clock.py 
 
 on:
   schedule:
     # Runs every 5 minutes
-    - cron: "*/5 * * * *"
+      - cron: "*/5 * * * *"
   workflow_dispatch: # allows manual runs too
 
 jobs:
@@ -27,5 +27,7 @@ jobs:
       - name: Run clock.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MY_EMAIL: ${{ secrets.MY_EMAIL }}
+          MY_PW: ${{ secrets.MY_PW }}
         run: |
           python -c "from clock import main; main(1)"
