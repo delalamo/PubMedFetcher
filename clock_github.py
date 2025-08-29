@@ -52,7 +52,7 @@ def embed_papers(
     with open("model_openai.pkl", "rb") as f:
         clf = pickle.load(f)
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_KEY"))
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Relevance": []}
     prompts = []
     for i, (title, abstract, journal) in enumerate(
@@ -197,9 +197,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
     """
 
     env_vars_set = {
-        "MY_EMAIL": bool(os.environ.get("MY_EMAIL")),
-        "MY_PW": bool(os.environ.get("MY_PW")),
-        "OPENAI_KEY": bool(os.environ.get("OPENAI_KEY")),
+        x: bool(os.environ.get(x)) for x in ["MY_EMAIL", "MY_PW", "OPENAI_API_KEY"]
     }
 
     if not all(env_vars_set.values()):
