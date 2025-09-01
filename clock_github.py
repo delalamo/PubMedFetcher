@@ -103,6 +103,10 @@ def scrape_arxiv(n_days: int) -> Dict[str, List]:
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     arxiv_papers = scraper.scrape()
+
+    # Indicates failuer
+    if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
+        return data
     for paper in arxiv_papers:
         data["Title"].append(paper["title"])
         data["Abstract"].append(paper["abstract"].replace("\n", " "))
