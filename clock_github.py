@@ -38,7 +38,7 @@ def format_date(date, sep: str = "/") -> str:
 
 
 def embed_papers(
-    data: Dict[str, List], cutoff=0.05, test_mode: bool = False
+    client: OpenAI, data: Dict[str, List], cutoff=0.05, test_mode: bool = False
 ) -> pd.DataFrame:
     """Embeds papers using OpenAI's API and filters them by relevance.
 
@@ -52,7 +52,6 @@ def embed_papers(
     with open("model_openai.pkl", "rb") as f:
         clf = pickle.load(f)
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Relevance": []}
     prompts = []
     for i, (title, abstract, journal) in enumerate(
@@ -83,6 +82,34 @@ def embed_papers(
     df = df.sort_values("Relevance", ascending=False)
     df = df[df["Relevance"] >= cutoff]
     return df
+
+
+def summarize_abstract(client: OpenAI, abstract: str) -> str:
+    """Summarize an abstract into two sentences using the OpenAI API.
+
+    Args:
+        client: An instance of the OpenAI client.
+        abstract: The abstract text to summarize.
+
+    Returns:
+        A concise summary of the abstract.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # lightweight, fast, cheap
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that summarizes scientific abstracts into two concise sentences.",
+                },
+                {"role": "user", "content": abstract},
+            ],
+            max_tokens=150,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"[Summary unavailable: {e}]"
 
 
 def scrape_arxiv(n_days: int) -> Dict[str, List]:
@@ -200,6 +227,8 @@ def main(n_days: int, test_mode: bool = False) -> None:
         n_days: The number of days to look back.
     """
 
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
     env_vars_set = {
         x: bool(os.environ.get(x)) for x in ["MY_EMAIL", "MY_PW", "OPENAI_API_KEY"]
     }
@@ -219,7 +248,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         for field in data.keys():
             data[field].extend(d[field])
 
-    df = embed_papers(data, test_mode=test_mode)
+    df = embed_papers(client, data, test_mode=test_mode)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = MIMEText(f"The current time is: {now}")
@@ -230,18 +259,19 @@ def main(n_days: int, test_mode: bool = False) -> None:
     message["Subject"] = f"Papers {datetime.now()}"
 
     body = ""
-    for _, row in df.iterrows():
-        title = row["Title"]
-        abstract = row["Abstract"]
-        journal = row["Journal"]
-        prob = row["Relevance"]
-        body += f"{title} ({journal})\n{(100*prob):.1f}% relevant\n\n\t{abstract}\n\n\n"
-
     body += "{} total papers fetched from Arxiv. \n".format(len(data_arxiv["Title"]))
     body += "{} total papers fetched from PubMed. \n".format(len(data_pubmed["Title"]))
     body += "{} total papers fetched from Biorxiv, Chemrxiv, and Medrxiv.".format(
         len(data_biorxiv["Title"])
     )
+
+    for _, row in df.iterrows():
+        title = row["Title"]
+        abstract = row["Abstract"]
+        journal = row["Journal"]
+        prob = row["Relevance"]
+        summary = summarize_abstract(client, abstract)
+        body += f"{title} ({journal})\n{(100*prob):.1f}% relevant\nSummary: {summary}\nAbstract: {abstract}\n\n\n"
 
     message.attach(MIMEText(body, "plain"))
 
@@ -265,7 +295,7 @@ def send_email_daily() -> None:
     """Sends an email with relevant papers Tuesday-Friday."""
 
     n_days = 1
-    main(n_days, test_mode=False)
+    main(n_days, test_mode=True)
 
 
 # sched.start()
