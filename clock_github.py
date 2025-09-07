@@ -105,7 +105,9 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-def scrape_arxiv(n_days: int) -> Dict[str, List]:
+def scrape_arxiv(
+    n_days: int, categories: List[str] = ["q-bio", "cond-mat", "stat"]
+) -> Dict[str, List]:
     """Scrapes arXiv for papers in the q-bio category published in the last n_days.
 
     Args:
@@ -115,22 +117,24 @@ def scrape_arxiv(n_days: int) -> Dict[str, List]:
         A dictionary containing paper titles, abstracts, and journals.
     """
     print("Scraping arxiv")
+    data = {"Title": [], "Abstract": [], "Journal": []}
     start = (
         str(datetime.now() - timedelta(days=n_days + 1)).split()[0].replace("/", "-")
     )
     end = str(datetime.now() - timedelta(days=1)).split()[0].replace("/", "-")
-    scraper = arxivscraper.Scraper(category="q-bio", date_from=start, date_until=end)
 
-    data = {"Title": [], "Abstract": [], "Journal": []}
-    arxiv_papers = scraper.scrape()
+    for cat in categories:
+        scraper = arxivscraper.Scraper(category=cat, date_from=start, date_until=end)
 
-    # Indicates failuer
-    if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
-        return data
-    for paper in arxiv_papers:
-        data["Title"].append(paper["title"])
-        data["Abstract"].append(paper["abstract"].replace("\n", " "))
-        data["Journal"].append("arXiv")
+        arxiv_papers = scraper.scrape()
+
+        # Indicates failuer
+        if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
+            return data
+        for paper in arxiv_papers:
+            data["Title"].append(paper["title"])
+            data["Abstract"].append(paper["abstract"].replace("\n", " "))
+            data["Journal"].append("arXiv")
     return data
 
 
