@@ -97,7 +97,7 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence.",
+                "content": "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence of no more than thirty words. Do not use semicolons, parentheses, or any other syntax intended to extend a sentence. Keep it simple and concise.",
             },
             {"role": "user", "content": abstract},
         ],
