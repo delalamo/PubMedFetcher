@@ -21,6 +21,18 @@ from openai import OpenAI
 load_dotenv()
 
 
+def openai_summary_prompt() -> str:
+    """Returns the prompt used for summarizing abstracts with OpenAI."""
+    return (
+        "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence of no more than thirty words. "
+        "Do not use semicolons, parentheses, or any other syntax intended to extend a sentence. Keep it simple and concise. "
+        "If the study is a literature review, mention that. "
+        "If the study introduces a new method, and the name of the method is not in the title, mention the name of the method explicitly. "
+        "Prioritize mentioning the main findings of the study. Do not offer your own interpretation. "
+        "There is no need to be exhaustive about the contents of the study. Just broad highlights."
+    )
+
+
 def format_date(date, sep: str = "/") -> str:
     """Formats a datetime object into a string.
 
@@ -82,7 +94,7 @@ def embed_papers(
     return df
 
 
-def summarize_abstract(client: OpenAI, abstract: str) -> str:
+def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
     """Summarize an abstract into two sentences using the OpenAI API.
 
     Args:
@@ -97,9 +109,12 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence of no more than thirty words. Do not use semicolons, parentheses, or any other syntax intended to extend a sentence. Keep it simple and concise.",
+                "content": openai_summary_prompt(),
             },
-            {"role": "user", "content": abstract},
+            {
+                "role": "user",
+                "content": f"Title of the study: {title}; Abstract: {abstract}",
+            },
         ],
     )
     return response.choices[0].message.content.strip()
@@ -258,14 +273,14 @@ def main(n_days: int, test_mode: bool = False) -> None:
     n_pubmed = len(data_pubmed["Title"])
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
-    body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv*\n\n"
+    body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
 
     for _, row in df.iterrows():
         title = row["Title"]
         abstract = row["Abstract"]
         journal = row["Journal"]
         prob = row["Relevance"]
-        summary = summarize_abstract(client, abstract)
+        summary = summarize_abstract(client, title, abstract)
         body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(100*prob):.1f}%\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
