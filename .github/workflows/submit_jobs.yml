@@ -1,4 +1,4 @@
-name: Run clock.py 
+name: Run fetching script
 
 on:
   schedule:

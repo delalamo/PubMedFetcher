@@ -1,4 +1,4 @@
-name: Run clock.py 
+name: Test fetching script on reduced input set.
 
 on:
   workflow_dispatch: # allows manual runs too
