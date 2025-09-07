@@ -97,7 +97,7 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant that summarizes scientific abstracts into a single sentence.",
+                "content": "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence.",
             },
             {"role": "user", "content": abstract},
         ],
@@ -250,9 +250,9 @@ def main(n_days: int, test_mode: bool = False) -> None:
     message["To"] = os.environ.get("MY_EMAIL")
     message["Subject"] = f"Papers {datetime.now()}"
 
-    body = "Summary of fetched papers\n"
-    body += "{} total papers from Arxiv. \n".format(len(data_arxiv["Title"]))
-    body += "{} total papers from PubMed. \n".format(len(data_pubmed["Title"]))
+    body = "Summary of fetched papers\n\n"
+    body += "{} total papers from Arxiv. \n\n".format(len(data_arxiv["Title"]))
+    body += "{} total papers from PubMed. \n\n".format(len(data_pubmed["Title"]))
     body += "{} total papers from Biorxiv, Chemrxiv, and Medrxiv. \n\n".format(
         len(data_biorxiv["Title"])
     )
@@ -263,10 +263,10 @@ def main(n_days: int, test_mode: bool = False) -> None:
         journal = row["Journal"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, abstract)
-        body += f"### {title}\n**Journal**: {journal})\n**Relevance**: {(100*prob):.1f}%\n**Summary**: {summary}\n**Abstract**: {abstract}\n\n\n"
+        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(100*prob):.1f}%\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
-    message.attach(MIMEText(body, "plain"))
+    # message.attach(MIMEText(body, "plain"))
     message.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
