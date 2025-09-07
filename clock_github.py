@@ -36,7 +36,7 @@ def format_date(date, sep: str = "/") -> str:
 
 
 def embed_papers(
-    client: OpenAI, data: Dict[str, List], cutoff=0.05, test_mode: bool = False
+    client: OpenAI, data: Dict[str, List], cutoff=0.35, test_mode: bool = False
 ) -> pd.DataFrame:
     """Embeds papers using OpenAI's API and filters them by relevance.
 
