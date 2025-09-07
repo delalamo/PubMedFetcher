@@ -96,7 +96,7 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant that summarizes scientific abstracts into two concise sentences.",
+                "content": "You are a helpful assistant that summarizes scientific abstracts into a single sentence.",
             },
             {"role": "user", "content": abstract},
         ],
@@ -262,7 +262,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         journal = row["Journal"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, abstract)
-        body += f"{title} ({journal})\nRelevance: {(100*prob):.1f}%\nSummary: {summary}\nAbstract: {abstract}\n\n\n"
+        body += f"### {title}\n**Journal**: {journal})\n**Relevance**: {(100*prob):.1f}%\n**Summary**: {summary}\n**Abstract**: {abstract}\n\n\n"
 
     message.attach(MIMEText(body, "plain"))
 
