@@ -37,6 +37,7 @@ jmespath==1.0.1
 joblib==1.4.2
 kiwisolver==1.4.8
 lxml==5.3.0
+markdown==3.9
 matplotlib==3.10.0
 matplotlib-venn==1.1.1
 numpy==1.26.4

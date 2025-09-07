@@ -1,3 +1,4 @@
+import markdown
 import json
 from datetime import datetime, timedelta
 import os
@@ -264,7 +265,9 @@ def main(n_days: int, test_mode: bool = False) -> None:
         summary = summarize_abstract(client, abstract)
         body += f"### {title}\n**Journal**: {journal})\n**Relevance**: {(100*prob):.1f}%\n**Summary**: {summary}\n**Abstract**: {abstract}\n\n\n"
 
+    html_body = markdown.markdown(body)
     message.attach(MIMEText(body, "plain"))
+    message.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ.get("MY_EMAIL"), os.environ.get("MY_PW"))
