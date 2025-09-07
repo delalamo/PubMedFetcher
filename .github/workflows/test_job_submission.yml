@@ -1,9 +1,6 @@
 name: Run clock.py 
 
 on:
-  schedule:
-    # Runs every 24 hours
-      - cron: "0 0 * * *"
   workflow_dispatch: # allows manual runs too
 
 jobs:
@@ -30,4 +27,4 @@ jobs:
           MY_EMAIL: ${{ secrets.MY_EMAIL }}
           MY_PW: ${{ secrets.MY_PW }}
         run: |
-          python -c "from clock_github import main; main(1, test_mode=False)"
+          python -c "from clock_github import main; main(1, test_mode=True)"
