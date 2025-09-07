@@ -91,21 +91,17 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
     Returns:
         A concise summary of the abstract.
     """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-5-nano",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that summarizes scientific abstracts into two concise sentences.",
-                },
-                {"role": "user", "content": abstract},
-            ],
-            temperature=0.1,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"SUMMARY NOT AVAILABLE: {e}"
+    response = client.chat.completions.create(
+        model="gpt-5-nano",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that summarizes scientific abstracts into two concise sentences.",
+            },
+            {"role": "user", "content": abstract},
+        ],
+    )
+    return response.choices[0].message.content.strip()
 
 
 def scrape_arxiv(n_days: int) -> Dict[str, List]:
