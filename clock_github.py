@@ -295,7 +295,7 @@ def send_email_daily() -> None:
     """Sends an email with relevant papers Tuesday-Friday."""
 
     n_days = 1
-    main(n_days, test_mode=True)
+    main(n_days, test_mode=False)
 
 
 # sched.start()
