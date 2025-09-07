@@ -74,7 +74,7 @@ def embed_papers(
                 analyzed_data["Journal"].append(p[2])
                 analyzed_data["Relevance"].append(prob)
             prompts = []
-        if test_mode and len(analyzed_data["Title"]) >= 2:
+        if test_mode and len(analyzed_data["Title"]) >= 5:
             break
     df = pd.DataFrame.from_dict(analyzed_data)
     df = df.sort_values("Relevance", ascending=False)
@@ -254,12 +254,11 @@ def main(n_days: int, test_mode: bool = False) -> None:
     message["To"] = os.environ.get("MY_EMAIL")
     message["Subject"] = f"Papers {datetime.now()}"
 
-    body = "Summary of fetched papers\n\n"
-    body += "{} total papers from Arxiv. \n\n".format(len(data_arxiv["Title"]))
-    body += "{} total papers from PubMed. \n\n".format(len(data_pubmed["Title"]))
-    body += "{} total papers from Biorxiv, Chemrxiv, and Medrxiv. \n\n".format(
-        len(data_biorxiv["Title"])
-    )
+    n_arxiv = len(data_arxiv["Title"])
+    n_pubmed = len(data_pubmed["Title"])
+    n_biorxiv = len(data_biorxiv["Title"])
+    n_total = n_arxiv + n_pubmed + n_biorxiv
+    body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv*\n\n"
 
     for _, row in df.iterrows():
         title = row["Title"]
