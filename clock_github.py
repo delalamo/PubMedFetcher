@@ -3,10 +3,9 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import pickle
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import smtplib
-from apscheduler.schedulers.blocking import BlockingScheduler
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -19,8 +18,6 @@ from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
-
-sched = BlockingScheduler()
 
 
 def format_date(date, sep: str = "/") -> str:
@@ -104,7 +101,6 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
                 },
                 {"role": "user", "content": abstract},
             ],
-            max_tokens=150,
             temperature=0.1,
         )
         return response.choices[0].message.content.strip()
@@ -170,7 +166,6 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
         save_path="biorxiv.jsonl",
     )
 
-    # collect data
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
         with open(jsonfile) as infile:
@@ -280,29 +275,3 @@ def main(n_days: int, test_mode: bool = False) -> None:
         server.sendmail(
             os.environ.get("MY_EMAIL"), os.environ.get("MY_EMAIL"), message.as_string()
         )
-
-
-@sched.scheduled_job("cron", day_of_week="mon", hour=5)
-def send_email_monday() -> None:
-    """Sends an email with relevant papers on Mondays."""
-
-    n_days = 3
-    main(n_days, test_mode=False)
-
-
-@sched.scheduled_job("cron", day_of_week="tue-fri", hour=5)
-def send_email_daily() -> None:
-    """Sends an email with relevant papers Tuesday-Friday."""
-
-    n_days = 1
-    main(n_days, test_mode=False)
-
-
-# sched.start()
-
-# this just sends emails nonstop
-# if __name__ == "__main__":
-#     n_days = 1
-#     main(n_days)
-# else:
-#     sched.start()

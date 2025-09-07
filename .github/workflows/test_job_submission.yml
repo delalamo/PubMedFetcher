@@ -1,7 +1,7 @@
 name: Test fetching script on reduced input set.
 
 on:
-  workflow_dispatch: # allows manual runs too
+  workflow_dispatch:
 
 jobs:
   run-clock:

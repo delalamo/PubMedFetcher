@@ -2,9 +2,8 @@ name: Run fetching script
 
 on:
   schedule:
-    # Runs every 24 hours
       - cron: "0 0 * * *"
-  workflow_dispatch: # allows manual runs too
+  workflow_dispatch:
 
 jobs:
   run-clock:
