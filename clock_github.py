@@ -96,7 +96,7 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # lightweight, fast, cheap
+            model="gpt-5-nano",
             messages=[
                 {
                     "role": "system",
@@ -109,7 +109,7 @@ def summarize_abstract(client: OpenAI, abstract: str) -> str:
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"[Summary unavailable: {e}]"
+        return f"SUMMARY NOT AVAILABLE: {e}"
 
 
 def scrape_arxiv(n_days: int) -> Dict[str, List]:
@@ -258,10 +258,10 @@ def main(n_days: int, test_mode: bool = False) -> None:
     message["To"] = os.environ.get("MY_EMAIL")
     message["Subject"] = f"Papers {datetime.now()}"
 
-    body = ""
-    body += "{} total papers fetched from Arxiv. \n".format(len(data_arxiv["Title"]))
-    body += "{} total papers fetched from PubMed. \n".format(len(data_pubmed["Title"]))
-    body += "{} total papers fetched from Biorxiv, Chemrxiv, and Medrxiv.".format(
+    body = "Summary of fetched papers\n"
+    body += "{} total papers from Arxiv. \n".format(len(data_arxiv["Title"]))
+    body += "{} total papers from PubMed. \n".format(len(data_pubmed["Title"]))
+    body += "{} total papers from Biorxiv, Chemrxiv, and Medrxiv. \n\n".format(
         len(data_biorxiv["Title"])
     )
 
@@ -271,7 +271,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         journal = row["Journal"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, abstract)
-        body += f"{title} ({journal})\n{(100*prob):.1f}% relevant\nSummary: {summary}\nAbstract: {abstract}\n\n\n"
+        body += f"{title} ({journal})\nRelevance: {(100*prob):.1f}%\nSummary: {summary}\nAbstract: {abstract}\n\n\n"
 
     message.attach(MIMEText(body, "plain"))
 
