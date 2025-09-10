@@ -150,7 +150,7 @@ def scrape_arxiv(
             data["Title"].append(paper["title"])
             data["Abstract"].append(paper["abstract"].replace("\n", " "))
             data["Journal"].append("arXiv")
-    return data
+    return data, ""
 
 
 def scrape_biorxiv(n_days: int) -> Dict[str, List]:
@@ -166,21 +166,31 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
     end_rxivs = datetime.now() - timedelta(days=1)
 
-    chemrxiv(
-        begin_date=format_date(start_rxivs, "-"),
-        end_date=format_date(end_rxivs, "-"),
-        save_path="chemrxiv.jsonl",
-    )
-    medrxiv(
-        begin_date=format_date(start_rxivs, "-"),
-        end_date=format_date(end_rxivs, "-"),
-        save_path="medrxiv.jsonl",
-    )
-    biorxiv(
-        begin_date=format_date(start_rxivs, "-"),
-        end_date=format_date(end_rxivs, "-"),
-        save_path="biorxiv.jsonl",
-    )
+    error_msgs = []
+    try:
+        chemrxiv(
+            begin_date=format_date(start_rxivs, "-"),
+            end_date=format_date(end_rxivs, "-"),
+            save_path="chemrxiv.jsonl",
+        )
+    except json.decoder.JSONDecodeError as e:
+        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
+    try:
+        medrxiv(
+            begin_date=format_date(start_rxivs, "-"),
+            end_date=format_date(end_rxivs, "-"),
+            save_path="medrxiv.jsonl",
+        )
+    except json.decoder.JSONDecodeError as e:
+        error_msgs.append(f"Medrxiv scrape failed with error {e}. Continuing...")
+    try:
+        biorxiv(
+            begin_date=format_date(start_rxivs, "-"),
+            end_date=format_date(end_rxivs, "-"),
+            save_path="biorxiv.jsonl",
+        )
+    except json.decoder.JSONDecodeError as e:
+        error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
@@ -192,7 +202,7 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
                 data["Journal"].append(jsonfile.split(".")[0])
     for file in ["chemrxiv", "biorxiv", "medrxiv"]:
         os.system(f"rm {file}.jsonl")
-    return data
+    return data, error_msgs
 
 
 def scrape_pubmed(n_days: int) -> Dict[str, List]:
@@ -228,7 +238,7 @@ def scrape_pubmed(n_days: int) -> Dict[str, List]:
                 data["Journal"].append(article.journal.strip().replace("\n", " "))
             except:
                 data["Journal"].append("Journal not found")
-    return data
+    return data, ""
 
 
 def main(n_days: int, test_mode: bool = False) -> None:
@@ -249,9 +259,9 @@ def main(n_days: int, test_mode: bool = False) -> None:
         msg2 = ", ".join([k for k, v in env_vars_set.items() if not v])
         raise ValueError(msg1 + msg2)
 
-    data_pubmed = scrape_pubmed(n_days)
-    data_biorxiv = scrape_biorxiv(n_days)
-    data_arxiv = scrape_arxiv(n_days)
+    data_pubmed, _ = scrape_pubmed(n_days)
+    data_biorxiv, biorxiv_errors = scrape_biorxiv(n_days)
+    data_arxiv, _ = scrape_arxiv(n_days)
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
@@ -274,6 +284,13 @@ def main(n_days: int, test_mode: bool = False) -> None:
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
     body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
+    body += f"*Found {len(df)} relevant papers with cutoff 0.35.*\n\n"
+    if len(biorxiv_errors) > 0:
+        body += "*The following errors were encountered while scraping biorxiv/medrxiv/chemrxiv:*\n"
+        for err in biorxiv_errors:
+            body += f"  - {err}\n"
+        body += "\n"
+    body += "---\n\n"
 
     for _, row in df.iterrows():
         title = row["Title"]
