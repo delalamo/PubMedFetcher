@@ -145,7 +145,7 @@ def scrape_arxiv(
 
         # Indicates failuer
         if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
-            return data
+            return data, ""
         for paper in arxiv_papers:
             data["Title"].append(paper["title"])
             data["Abstract"].append(paper["abstract"].replace("\n", " "))
