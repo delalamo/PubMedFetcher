@@ -27,4 +27,4 @@ jobs:
           MY_EMAIL: ${{ secrets.MY_EMAIL }}
           MY_PW: ${{ secrets.MY_PW }}
         run: |
-          python -c "from clock_github import main; main(1, test_mode=True)"
+          python -c "from run import main; main(1, test_mode=True)"

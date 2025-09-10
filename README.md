@@ -1,8 +1,15 @@
 # PubMedFetcher
-This repo contains the code I use for fetching new papers every morning that might interest me. The good stuff is in `clock.py`. Right now (as of 9 September 2025) the main script is called daily via Github Actions and fetches abstracts from biorxiv, chemrxiv, medrxiv, arxiv (the bio-ml and stats sections only), and PubMed. These are then embedded using the OpenAI API and assigned a score using a custom-trained logistic regression model. Then it emails me all abstracts above a certain threshold, ranked by score, at 5AM GMT. The whole setup is free to run on the cloud with Github Actions, though there is the cost of calculating OpenAI embeddings ($1.00; this is much cheaper than renting a GPU from Azure/AWS/wherever).
+This repo contains the code I use for fetching new papers every morning that might interest me. The good stuff is in `run.py`. Right now (as of 9 September 2025) the main script is called daily via Github Actions and fetches abstracts from biorxiv, chemrxiv, medrxiv, arxiv (the bio-ml and stats sections only), and PubMed. These are then embedded using the OpenAI API, assigned a score using a custom-trained logistic regression model, and summarized by GPT-5-nano if deemed to be relevant. Then the script emails me all abstracts above a certain threshold, ranked by score, at midnight GMT. The whole setup is free to run on the cloud with Github Actions, though there is the cost of calculating OpenAI embeddings of about $0.02 per day.
+
+## How to use this repo
+1. Fork this repo
+2. Add the following secrets under Settings > Secrets and variables > Actions:
+    * MY_EMAIL: Your email
+    * MY_PW: An app password assigned by your email client (not your actual email password!)
+    * OPENAI_API_KEY: The API Key for OpenAI used to calculate embeddings and generate summaries.
+3. Optional: setup your logistic regression model using setup_regression_model.py (TODO) 
 
 #### TODO
-- [ ] Restructure README to show instructions for forking, retraining, and retrieval
 - [ ] Include pre-computed embeddings of negative examples
 - [ ] Move cutoff option to main()
 
