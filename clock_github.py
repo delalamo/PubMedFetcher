@@ -194,6 +194,8 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
+        if not os.path.exists(jsonfile):
+            continue
         with open(jsonfile) as infile:
             for i, line in enumerate(infile):
                 l = json.loads(line)
