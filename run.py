@@ -243,7 +243,7 @@ def scrape_pubmed(n_days: int) -> Dict[str, List]:
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False) -> None:
+def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
     """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
 
     Args:
@@ -271,7 +271,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         for field in data.keys():
             data[field].extend(d[field])
 
-    df = embed_papers(client, data, test_mode=test_mode)
+    df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = MIMEText(f"The current time is: {now}")
@@ -286,7 +286,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
     body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
-    body += f"*Found {len(df)} relevant papers with cutoff 0.35.*\n\n"
+    body += f"*Found {len(df)} relevant papers with cutoff {cutoff}.*\n\n"
     if len(biorxiv_errors) > 0:
         body += "*The following errors were encountered while scraping biorxiv/medrxiv/chemrxiv:*\n"
         for err in biorxiv_errors:
@@ -300,7 +300,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         journal = row["Journal"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, title, abstract)
-        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(100*prob):.1f}%\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
+        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(10*prob):.1f}/10%\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
     # message.attach(MIMEText(body, "plain"))
