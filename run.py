@@ -1,3 +1,4 @@
+import requests
 import markdown
 import json
 from datetime import datetime, timedelta
@@ -175,6 +176,8 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
         )
     except json.decoder.JSONDecodeError as e:
         error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
+    except requests.exceptions.JSONDecodeError as e:
+        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     try:
         medrxiv(
             begin_date=format_date(start_rxivs, "-"),
@@ -183,6 +186,8 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
         )
     except json.decoder.JSONDecodeError as e:
         error_msgs.append(f"Medrxiv scrape failed with error {e}. Continuing...")
+    except requests.exceptions.JSONDecodeError as e:
+        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     try:
         biorxiv(
             begin_date=format_date(start_rxivs, "-"),
@@ -191,7 +196,8 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
         )
     except json.decoder.JSONDecodeError as e:
         error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
-
+    except requests.exceptions.JSONDecodeError as e:
+        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
         if not os.path.exists(jsonfile):
