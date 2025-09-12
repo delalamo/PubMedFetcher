@@ -306,7 +306,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
         journal = row["Journal"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, title, abstract)
-        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(10*prob):.1f}/10%\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
+        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(10*prob):.2f}/10\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
     # message.attach(MIMEText(body, "plain"))
