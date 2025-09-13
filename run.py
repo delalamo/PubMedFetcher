@@ -174,9 +174,7 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
             end_date=format_date(end_rxivs, "-"),
             save_path="chemrxiv.jsonl",
         )
-    except json.decoder.JSONDecodeError as e:
-        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
-    except requests.exceptions.JSONDecodeError as e:
+    except Exception as e:
         error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     try:
         medrxiv(
@@ -184,9 +182,7 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
             end_date=format_date(end_rxivs, "-"),
             save_path="medrxiv.jsonl",
         )
-    except json.decoder.JSONDecodeError as e:
-        error_msgs.append(f"Medrxiv scrape failed with error {e}. Continuing...")
-    except requests.exceptions.JSONDecodeError as e:
+    except Exception as e:
         error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     try:
         biorxiv(
@@ -194,9 +190,7 @@ def scrape_biorxiv(n_days: int) -> Dict[str, List]:
             end_date=format_date(end_rxivs, "-"),
             save_path="biorxiv.jsonl",
         )
-    except json.decoder.JSONDecodeError as e:
-        error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
-    except requests.exceptions.JSONDecodeError as e:
+    except Exception as e:
         error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
