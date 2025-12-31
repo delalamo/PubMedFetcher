@@ -1,22 +1,19 @@
-import requests
-import markdown
 import json
-from datetime import datetime, timedelta
 import os
-from dotenv import load_dotenv
 import pickle
-from typing import Dict, List, Tuple, Union
-
 import smtplib
-from email.mime.text import MIMEText
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-import pandas as pd
-import numpy as np
-from pymed import PubMed
 import arxivscraper
-from paperscraper.get_dumps import biorxiv, medrxiv, chemrxiv
+import markdown
+import numpy as np
+import pandas as pd
+from dotenv import load_dotenv
 from openai import OpenAI
+from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
+from pymed import PubMed
 
 # Load environment variables
 load_dotenv()
@@ -49,7 +46,7 @@ def format_date(date, sep: str = "/") -> str:
 
 
 def embed_papers(
-    client: OpenAI, data: Dict[str, List], cutoff=0.35, test_mode: bool = False
+    client: OpenAI, data: dict[str, list], cutoff=0.35, test_mode: bool = False
 ) -> pd.DataFrame:
     """Embeds papers using OpenAI's API and filters them by relevance.
 
@@ -124,16 +121,19 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
 
 
 def scrape_arxiv(
-    n_days: int, categories: List[str] = ["q-bio", "cond-mat", "stat"]
-) -> Tuple[Dict[str, List], str]:
+    n_days: int, categories: list[str] | None = None
+) -> tuple[dict[str, list], str]:
     """Scrapes arXiv for papers in the q-bio category published in the last n_days.
 
     Args:
         n_days: The number of days to look back.
+        categories: List of arXiv categories to scrape. Defaults to q-bio, cond-mat, stat.
 
     Returns:
         A tuple of (dictionary containing paper titles, abstracts, and journals, error message).
     """
+    if categories is None:
+        categories = ["q-bio", "cond-mat", "stat"]
     print("Scraping arxiv")
     data = {"Title": [], "Abstract": [], "Journal": []}
     start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y-%m-%d")
@@ -154,14 +154,14 @@ def scrape_arxiv(
     return data, ""
 
 
-def scrape_biorxiv(n_days: int) -> Tuple[Dict[str, List], List[str]]:
+def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
     """Scrapes biorxiv, medrxiv, and chemrxiv for papers published in the last n_days.
 
     Args:
         n_days: The number of days to look back.
 
     Returns:
-        A dictionary containing paper titles, abstracts, and journals.
+        A tuple of (dictionary containing paper titles, abstracts, and journals, list of error messages).
     """
     print("Scraping biorxiv")
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
@@ -197,10 +197,10 @@ def scrape_biorxiv(n_days: int) -> Tuple[Dict[str, List], List[str]]:
         if not os.path.exists(jsonfile):
             continue
         with open(jsonfile) as infile:
-            for i, line in enumerate(infile):
-                l = json.loads(line)
-                data["Title"].append(l["title"])
-                data["Abstract"].append(l["abstract"].replace("\n", " "))
+            for line in infile:
+                entry = json.loads(line)
+                data["Title"].append(entry["title"])
+                data["Abstract"].append(entry["abstract"].replace("\n", " "))
                 data["Journal"].append(jsonfile.split(".")[0])
     for file in ["chemrxiv", "biorxiv", "medrxiv"]:
         filepath = f"{file}.jsonl"
@@ -209,7 +209,7 @@ def scrape_biorxiv(n_days: int) -> Tuple[Dict[str, List], List[str]]:
     return data, error_msgs
 
 
-def scrape_pubmed(n_days: int) -> Tuple[Dict[str, List], str]:
+def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     """Scrapes PubMed for papers published in the last n_days.
 
     Args:
@@ -269,7 +269,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
 
     data = {"Title": [], "Abstract": [], "Journal": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
-        for field in data.keys():
+        for field in data:
             data[field].extend(d[field])
 
     df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)

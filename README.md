@@ -7,7 +7,7 @@ This repo contains the code I use for fetching new papers every morning that mig
     * MY_EMAIL: Your email
     * MY_PW: An app password assigned by your email client (not your actual email password!)
     * OPENAI_API_KEY: The API Key for OpenAI used to calculate embeddings and generate summaries.
-3. Optional: setup your logistic regression model using setup_regression_model.py (TODO) 
+3. Optional: setup your logistic regression model using setup_regression_model.py (TODO)
 
 #### TODO
 - [ ] Include pre-computed embeddings of negative examples

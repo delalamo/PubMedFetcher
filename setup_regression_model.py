@@ -1,9 +1,11 @@
 import os
-import pandas as pd
+import pickle
+
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from openai import OpenAI
+import pandas as pd
 from dotenv import load_dotenv
+from openai import OpenAI
+from sklearn.linear_model import LogisticRegression
 
 load_dotenv()
 
@@ -29,7 +31,6 @@ if len(prompt) > 0:
     for d in response.data:
         reps.append(np.asarray(d.embedding[:512]))
 clf = LogisticRegression(random_state=0, max_iter=10000).fit(reps, labels)
-import pickle
 
 with open("model_openai_512.pkl", "wb") as f:
     pickle.dump(clf, f)
