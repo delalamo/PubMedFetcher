@@ -115,10 +115,14 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
             },
         ],
     )
+    if not response.choices:
+        return "Summary not available."
     return response.choices[0].message.content.strip()
 
 
-def scrape_arxiv(n_days: int, categories: list[str] | None = None) -> dict[str, list]:
+def scrape_arxiv(
+    n_days: int, categories: list[str] | None = None
+) -> tuple[dict[str, list], str]:
     """Scrapes arXiv for papers in the q-bio category published in the last n_days.
 
     Args:
@@ -126,16 +130,14 @@ def scrape_arxiv(n_days: int, categories: list[str] | None = None) -> dict[str, 
         categories: List of arXiv categories to scrape. Defaults to q-bio, cond-mat, stat.
 
     Returns:
-        A dictionary containing paper titles, abstracts, and journals.
+        A tuple of (dictionary containing paper titles, abstracts, and journals, error message).
     """
     if categories is None:
         categories = ["q-bio", "cond-mat", "stat"]
     print("Scraping arxiv")
     data = {"Title": [], "Abstract": [], "Journal": []}
-    start = (
-        str(datetime.now() - timedelta(days=n_days + 1)).split()[0].replace("/", "-")
-    )
-    end = str(datetime.now() - timedelta(days=1)).split()[0].replace("/", "-")
+    start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y-%m-%d")
+    end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     for cat in categories:
         scraper = arxivscraper.Scraper(category=cat, date_from=start, date_until=end)
@@ -152,14 +154,14 @@ def scrape_arxiv(n_days: int, categories: list[str] | None = None) -> dict[str, 
     return data, ""
 
 
-def scrape_biorxiv(n_days: int) -> dict[str, list]:
+def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
     """Scrapes biorxiv, medrxiv, and chemrxiv for papers published in the last n_days.
 
     Args:
         n_days: The number of days to look back.
 
     Returns:
-        A dictionary containing paper titles, abstracts, and journals.
+        A tuple of (dictionary containing paper titles, abstracts, and journals, list of error messages).
     """
     print("Scraping biorxiv")
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
@@ -181,7 +183,7 @@ def scrape_biorxiv(n_days: int) -> dict[str, list]:
             save_path="medrxiv.jsonl",
         )
     except Exception as e:
-        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
+        error_msgs.append(f"Medrxiv scrape failed with error {e}. Continuing...")
     try:
         biorxiv(
             begin_date=format_date(start_rxivs, "-"),
@@ -189,7 +191,7 @@ def scrape_biorxiv(n_days: int) -> dict[str, list]:
             save_path="biorxiv.jsonl",
         )
     except Exception as e:
-        error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
+        error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
     data = {"Title": [], "Abstract": [], "Journal": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
         if not os.path.exists(jsonfile):
@@ -201,18 +203,20 @@ def scrape_biorxiv(n_days: int) -> dict[str, list]:
                 data["Abstract"].append(entry["abstract"].replace("\n", " "))
                 data["Journal"].append(jsonfile.split(".")[0])
     for file in ["chemrxiv", "biorxiv", "medrxiv"]:
-        os.system(f"rm {file}.jsonl")
+        filepath = f"{file}.jsonl"
+        if os.path.exists(filepath):
+            os.remove(filepath)
     return data, error_msgs
 
 
-def scrape_pubmed(n_days: int) -> dict[str, list]:
+def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     """Scrapes PubMed for papers published in the last n_days.
 
     Args:
         n_days: The number of days to look back.
 
     Returns:
-        A dictionary containing paper titles, abstracts, and journals.
+        A tuple of (dictionary containing paper titles, abstracts, and journals, error message).
     """
     print("Scraping pubmed")
     end = datetime.now() - timedelta(days=1)
@@ -236,7 +240,7 @@ def scrape_pubmed(n_days: int) -> dict[str, list]:
             data["Abstract"].append(abstract)
             try:
                 data["Journal"].append(article.journal.strip().replace("\n", " "))
-            except Exception:
+            except (AttributeError, TypeError):
                 data["Journal"].append("Journal not found")
     return data, ""
 
@@ -270,9 +274,6 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
 
     df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = MIMEText(f"The current time is: {now}")
-
     message = MIMEMultipart()
     message["From"] = os.environ.get("MY_EMAIL")
     message["To"] = os.environ.get("MY_EMAIL")
@@ -283,7 +284,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
     body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
-    body += f"*Found {len(df)} relevant papers with cutoff {cutoff}.*\n\n"
+    body += f"*Found {len(df)} relevant papers with cutoff {cutoff / 10:.2f}.*\n\n"
     if len(biorxiv_errors) > 0:
         body += "*The following errors were encountered while scraping biorxiv/medrxiv/chemrxiv:*\n"
         for err in biorxiv_errors:
