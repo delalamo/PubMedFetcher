@@ -60,14 +60,15 @@ def embed_papers(
     with open("model_openai.pkl", "rb") as f:
         clf = pickle.load(f)
 
-    analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Relevance": []}
+    analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Relevance": []}
     prompts = []
-    for i, (title, abstract, journal) in enumerate(
-        zip(data["Title"], data["Abstract"], data["Journal"])
+    links = data.get("Link", [""] * len(data["Title"]))
+    for i, (title, abstract, journal, link) in enumerate(
+        zip(data["Title"], data["Abstract"], data["Journal"], links)
     ):
         if len(abstract.split()) < 100:
             continue
-        prompts.append((abstract, title, journal))
+        prompts.append((abstract, title, journal, link))
 
         if len(prompts) >= 100 or i == len(data) - 1:
             abstracts = [p[0] for p in prompts]
@@ -82,6 +83,7 @@ def embed_papers(
                 analyzed_data["Title"].append(p[1])
                 analyzed_data["Abstract"].append(p[0])
                 analyzed_data["Journal"].append(p[2])
+                analyzed_data["Link"].append(p[3])
                 analyzed_data["Relevance"].append(prob)
             prompts = []
         if test_mode and len(analyzed_data["Title"]) >= 5:
@@ -135,7 +137,7 @@ def scrape_arxiv(
     if categories is None:
         categories = ["q-bio", "cond-mat", "stat"]
     print("Scraping arxiv")
-    data = {"Title": [], "Abstract": [], "Journal": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
     start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y-%m-%d")
     end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -151,6 +153,12 @@ def scrape_arxiv(
             data["Title"].append(paper["title"])
             data["Abstract"].append(paper["abstract"].replace("\n", " "))
             data["Journal"].append("arXiv")
+            # Construct arXiv link from paper ID
+            arxiv_id = paper.get("id", "")
+            if arxiv_id:
+                data["Link"].append(f"https://arxiv.org/abs/{arxiv_id}")
+            else:
+                data["Link"].append("")
     return data, ""
 
 
@@ -192,7 +200,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
         )
     except Exception as e:
         error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
-    data = {"Title": [], "Abstract": [], "Journal": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
         if not os.path.exists(jsonfile):
             continue
@@ -202,6 +210,12 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
                 data["Title"].append(entry["title"])
                 data["Abstract"].append(entry["abstract"].replace("\n", " "))
                 data["Journal"].append(jsonfile.split(".")[0])
+                # Construct DOI link if available
+                doi = entry.get("doi", "")
+                if doi:
+                    data["Link"].append(f"https://doi.org/{doi}")
+                else:
+                    data["Link"].append("")
     for file in ["chemrxiv", "biorxiv", "medrxiv"]:
         filepath = f"{file}.jsonl"
         if os.path.exists(filepath):
@@ -222,7 +236,7 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     end = datetime.now() - timedelta(days=1)
     days = [format_date(end - timedelta(days=i + 1), "/") for i in range(n_days)]
 
-    data = {"Title": [], "Abstract": [], "Journal": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
     for date in days:
         pubmed = PubMed(tool="MyTool", email="your@email.address")
         search_query = f"{date}[PDAT]"
@@ -242,6 +256,19 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
                 data["Journal"].append(article.journal.strip().replace("\n", " "))
             except (AttributeError, TypeError):
                 data["Journal"].append("Journal not found")
+            # Prefer DOI link, fallback to PubMed link
+            doi = getattr(article, "doi", None)
+            pubmed_id = getattr(article, "pubmed_id", None)
+            if doi:
+                # DOI may contain newlines, clean it
+                doi = str(doi).strip().split("\n")[0]
+                data["Link"].append(f"https://doi.org/{doi}")
+            elif pubmed_id:
+                # Use first PMID if multiple
+                pmid = str(pubmed_id).strip().split("\n")[0]
+                data["Link"].append(f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
+            else:
+                data["Link"].append("")
     return data, ""
 
 
@@ -267,7 +294,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
     data_biorxiv, biorxiv_errors = scrape_biorxiv(n_days)
     data_arxiv, _ = scrape_arxiv(n_days)
 
-    data = {"Title": [], "Abstract": [], "Journal": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
         for field in data:
             data[field].extend(d[field])
@@ -296,9 +323,15 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
         title = row["Title"]
         abstract = row["Abstract"]
         journal = row["Journal"]
+        link = row["Link"]
         prob = row["Relevance"]
         summary = summarize_abstract(client, title, abstract)
-        body += f"### {title}\n\n**Journal**: {journal}\n\n**Relevance**: {(10*prob):.2f}/10\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
+        # Add link to title if available
+        if link:
+            body += f"### [{title}]({link})\n\n"
+        else:
+            body += f"### {title}\n\n"
+        body += f"**Journal**: {journal}\n\n**Relevance**: {(10*prob):.2f}/10\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
     # message.attach(MIMEText(body, "plain"))
