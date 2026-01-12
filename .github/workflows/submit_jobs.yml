@@ -33,5 +33,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MY_EMAIL: ${{ secrets.MY_EMAIL }}
           MY_PW: ${{ secrets.MY_PW }}
+          MY_EMAIL_2: ${{ secrets.MY_EMAIL_2 }}
         run: |
           python -c "from run import main; main(1, test_mode=False)"

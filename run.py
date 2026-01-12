@@ -301,9 +301,14 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
 
     df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
 
+    # Build recipient list - include second email if configured
+    recipients = [os.environ.get("MY_EMAIL")]
+    if os.environ.get("MY_EMAIL_2"):
+        recipients.append(os.environ.get("MY_EMAIL_2"))
+
     message = MIMEMultipart()
     message["From"] = os.environ.get("MY_EMAIL")
-    message["To"] = os.environ.get("MY_EMAIL")
+    message["To"] = ", ".join(recipients)
     message["Subject"] = f"Papers {datetime.now()}"
 
     n_arxiv = len(data_arxiv["Title"])
@@ -340,5 +345,5 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ.get("MY_EMAIL"), os.environ.get("MY_PW"))
         server.sendmail(
-            os.environ.get("MY_EMAIL"), os.environ.get("MY_EMAIL"), message.as_string()
+            os.environ.get("MY_EMAIL"), recipients, message.as_string()
         )
