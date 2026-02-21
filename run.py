@@ -1,6 +1,6 @@
+import contextlib
 import json
 import os
-import pickle
 import smtplib
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -8,8 +8,7 @@ from email.mime.text import MIMEText
 
 import arxivscraper
 import markdown
-import numpy as np
-import pandas as pd
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
@@ -17,6 +16,19 @@ from pymed import PubMed
 
 # Load environment variables
 load_dotenv()
+
+
+def load_keywords(filepath: str = "keywords.txt") -> list[str]:
+    """Load keywords from a newline-delimited file.
+
+    Args:
+        filepath: Path to the keywords file. One keyword/phrase per line.
+
+    Returns:
+        A list of keyword strings.
+    """
+    with open(filepath) as f:
+        return [line.strip() for line in f if line.strip()]
 
 
 def openai_summary_prompt() -> str:
@@ -45,67 +57,186 @@ def format_date(date, sep: str = "/") -> str:
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
-def embed_papers(
-    client: OpenAI, data: dict[str, list], cutoff=0.35, test_mode: bool = False
-) -> pd.DataFrame:
-    """Embeds papers using OpenAI's API and filters them by relevance.
-
-    Args:
-        data: A dictionary containing paper titles, abstracts, and journals.
-        cutoff: The minimum relevance score for a paper to be included.
-
-    Returns:
-        A Pandas DataFrame with relevant papers, sorted by relevance.
-    """
-    with open("model_openai.pkl", "rb") as f:
-        clf = pickle.load(f)
-
-    analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Relevance": []}
-    prompts = []
-    links = data.get("Link", [""] * len(data["Title"]))
-    for i, (title, abstract, journal, link) in enumerate(
-        zip(data["Title"], data["Abstract"], data["Journal"], links)
-    ):
-        if len(abstract.split()) < 100:
-            continue
-        prompts.append((abstract, title, journal, link))
-
-        if len(prompts) >= 100 or i == len(data) - 1:
-            abstracts = [p[0] for p in prompts]
-            response = client.embeddings.create(
-                input=abstracts, model="text-embedding-3-small"
-            )
-            for p, d in zip(prompts, response.data):
-                prob = clf.predict_proba(np.asarray(d.embedding[:512]).reshape(1, -1))
-                prob = prob[:, 1].item()
-                if prob < cutoff:
-                    continue
-                analyzed_data["Title"].append(p[1])
-                analyzed_data["Abstract"].append(p[0])
-                analyzed_data["Journal"].append(p[2])
-                analyzed_data["Link"].append(p[3])
-                analyzed_data["Relevance"].append(prob)
-            prompts = []
-        if test_mode and len(analyzed_data["Title"]) >= 5:
-            break
-    df = pd.DataFrame.from_dict(analyzed_data)
-    df = df.sort_values("Relevance", ascending=False)
-    df = df[df["Relevance"] >= cutoff]
-    return df
-
-
-def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
-    """Summarize an abstract into two sentences using the OpenAI API.
+def classify_paper(
+    client: OpenAI, title: str, abstract: str, keywords: list[str]
+) -> bool:
+    """Classify a paper as relevant or not using GPT-4o-mini.
 
     Args:
         client: An instance of the OpenAI client.
+        title: The paper title.
+        abstract: The paper abstract.
+        keywords: List of keyword phrases defining research interests.
+
+    Returns:
+        True if the paper is classified as relevant, False otherwise.
+    """
+    keywords_str = "\n".join(f"- {kw}" for kw in keywords)
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a scientific paper classifier. Given a paper's title and abstract, "
+                    "and a list of research topics/keywords, determine if the paper is relevant to "
+                    "any of the listed topics. A paper is relevant if its primary focus or a major "
+                    "contribution relates to one or more of the topics. Respond with ONLY the word "
+                    "'relevant' or 'not relevant'. Do not include any other text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Research topics/keywords:\n{keywords_str}\n\n"
+                    f"Paper title: {title}\n\n"
+                    f"Paper abstract: {abstract}"
+                ),
+            },
+        ],
+        max_tokens=10,
+    )
+    if not response.choices:
+        return False
+    result = response.choices[0].message.content.strip().lower()
+    return "not relevant" not in result and "relevant" in result
+
+
+def classify_papers(
+    client: OpenAI,
+    data: dict[str, list],
+    keywords: list[str],
+    test_mode: bool = False,
+) -> list[dict]:
+    """Classify papers using GPT-4o-mini and return relevant ones.
+
+    Args:
+        client: An instance of the OpenAI client.
+        data: A dictionary containing paper data (Title, Abstract, Journal, Link, Authors).
+        keywords: List of keyword phrases defining research interests.
+        test_mode: If True, stop after finding 5 relevant papers.
+
+    Returns:
+        A list of dicts, each representing a relevant paper.
+    """
+    relevant = []
+    links = data.get("Link", [""] * len(data["Title"]))
+    authors_list = data.get("Authors", [""] * len(data["Title"]))
+    for title, abstract, journal, link, authors in zip(
+        data["Title"], data["Abstract"], data["Journal"], links, authors_list
+    ):
+        if len(abstract.split()) < 100:
+            continue
+        if classify_paper(client, title, abstract, keywords):
+            relevant.append(
+                {
+                    "Title": title,
+                    "Abstract": abstract,
+                    "Journal": journal,
+                    "Link": link,
+                    "Authors": authors,
+                }
+            )
+        if test_mode and len(relevant) >= 5:
+            break
+    return relevant
+
+
+def ensure_github_label() -> None:
+    """Ensure the 'paper' label exists in the GitHub repository."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        return
+    url = f"https://api.github.com/repos/{repo}/labels"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    # Attempt to create; ignore errors if label already exists
+    with contextlib.suppress(Exception):
+        requests.post(
+            url,
+            headers=headers,
+            json={
+                "name": "paper",
+                "color": "0075ca",
+                "description": "Relevant paper identified by PubMedFetcher",
+            },
+            timeout=30,
+        )
+
+
+def create_github_issue(
+    title: str,
+    abstract: str,
+    authors: str,
+    journal: str,
+    link: str,
+) -> bool:
+    """Create a GitHub issue for a relevant paper.
+
+    Args:
+        title: The paper title.
+        abstract: The paper abstract.
+        authors: Comma-separated list of authors.
+        journal: The venue/journal name.
+        link: URL to the paper (DOI or preprint link).
+
+    Returns:
+        True if the issue was created successfully, False otherwise.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        print("GITHUB_TOKEN or GITHUB_REPOSITORY not set, skipping issue creation")
+        return False
+
+    body = f"**Authors**: {authors}\n\n"
+    body += f"**Venue**: {journal}\n\n"
+    if link:
+        body += f"**Link**: {link}\n\n"
+    body += f"### Abstract\n\n{abstract}\n"
+
+    url = f"https://api.github.com/repos/{repo}/issues"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    payload = {"title": title, "body": body, "labels": ["paper"]}
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError:
+        # Retry without labels in case label doesn't exist
+        payload.pop("labels", None)
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            print(f"Failed to create issue for '{title}': {e}")
+            return False
+    except Exception as e:
+        print(f"Failed to create issue for '{title}': {e}")
+        return False
+
+
+def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
+    """Summarize an abstract into a single sentence using the OpenAI API.
+
+    Args:
+        client: An instance of the OpenAI client.
+        title: The paper title.
         abstract: The abstract text to summarize.
 
     Returns:
         A concise summary of the abstract.
     """
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-4o-mini",
         messages=[
             {
                 "role": "system",
@@ -125,19 +256,19 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
 def scrape_arxiv(
     n_days: int, categories: list[str] | None = None
 ) -> tuple[dict[str, list], str]:
-    """Scrapes arXiv for papers in the q-bio category published in the last n_days.
+    """Scrapes arXiv for papers published in the last n_days.
 
     Args:
         n_days: The number of days to look back.
         categories: List of arXiv categories to scrape. Defaults to q-bio, cond-mat, stat.
 
     Returns:
-        A tuple of (dictionary containing paper titles, abstracts, and journals, error message).
+        A tuple of (dictionary containing paper data, error message).
     """
     if categories is None:
         categories = ["q-bio", "cond-mat", "stat"]
     print("Scraping arxiv")
-    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
     start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y-%m-%d")
     end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -146,7 +277,7 @@ def scrape_arxiv(
 
         arxiv_papers = scraper.scrape()
 
-        # Indicates failuer
+        # Indicates failure
         if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
             return data, ""
         for paper in arxiv_papers:
@@ -159,6 +290,11 @@ def scrape_arxiv(
                 data["Link"].append(f"https://arxiv.org/abs/{arxiv_id}")
             else:
                 data["Link"].append("")
+            # Extract authors
+            authors = paper.get("authors", "")
+            if isinstance(authors, list):
+                authors = ", ".join(authors)
+            data["Authors"].append(authors if authors else "Authors not available")
     return data, ""
 
 
@@ -169,7 +305,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
         n_days: The number of days to look back.
 
     Returns:
-        A tuple of (dictionary containing paper titles, abstracts, and journals, list of error messages).
+        A tuple of (dictionary containing paper data, list of error messages).
     """
     print("Scraping biorxiv")
     start_rxivs = datetime.now() - timedelta(days=n_days + 1)
@@ -200,7 +336,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
         )
     except Exception as e:
         error_msgs.append(f"Biorxiv scrape failed with error {e}. Continuing...")
-    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
     for jsonfile in ["medrxiv.jsonl", "biorxiv.jsonl", "chemrxiv.jsonl"]:
         if not os.path.exists(jsonfile):
             continue
@@ -216,6 +352,11 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
                     data["Link"].append(f"https://doi.org/{doi}")
                 else:
                     data["Link"].append("")
+                # Extract authors
+                authors = entry.get("authors", "")
+                if isinstance(authors, list):
+                    authors = ", ".join(authors)
+                data["Authors"].append(authors if authors else "Authors not available")
     for file in ["chemrxiv", "biorxiv", "medrxiv"]:
         filepath = f"{file}.jsonl"
         if os.path.exists(filepath):
@@ -230,13 +371,13 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
         n_days: The number of days to look back.
 
     Returns:
-        A tuple of (dictionary containing paper titles, abstracts, and journals, error message).
+        A tuple of (dictionary containing paper data, error message).
     """
     print("Scraping pubmed")
     end = datetime.now() - timedelta(days=1)
     days = [format_date(end - timedelta(days=i + 1), "/") for i in range(n_days)]
 
-    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
     for date in days:
         pubmed = PubMed(tool="MyTool", email="your@email.address")
         search_query = f"{date}[PDAT]"
@@ -269,14 +410,34 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
                 data["Link"].append(f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
             else:
                 data["Link"].append("")
+            # Extract authors
+            authors = getattr(article, "authors", None)
+            if authors and isinstance(authors, list):
+                author_names = []
+                for a in authors:
+                    if isinstance(a, dict):
+                        firstname = a.get("firstname", "") or ""
+                        lastname = a.get("lastname", "") or ""
+                        name = f"{firstname} {lastname}".strip()
+                        if name:
+                            author_names.append(name)
+                    elif isinstance(a, str):
+                        author_names.append(a)
+                data["Authors"].append(
+                    ", ".join(author_names) if author_names else "Authors not available"
+                )
+            else:
+                data["Authors"].append("Authors not available")
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
-    """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
+def main(n_days: int, test_mode: bool = False) -> None:
+    """Scrapes papers, classifies them with GPT-4o-mini, creates GitHub issues,
+    and sends an email digest.
 
     Args:
         n_days: The number of days to look back.
+        test_mode: If True, stop after finding 5 relevant papers.
     """
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -290,16 +451,33 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
         msg2 = ", ".join([k for k, v in env_vars_set.items() if not v])
         raise ValueError(msg1 + msg2)
 
+    # Load keywords from file
+    keywords = load_keywords()
+    print(f"Loaded {len(keywords)} keywords")
+
     data_pubmed, _ = scrape_pubmed(n_days)
     data_biorxiv, biorxiv_errors = scrape_biorxiv(n_days)
     data_arxiv, _ = scrape_arxiv(n_days)
 
-    data = {"Title": [], "Abstract": [], "Journal": [], "Link": []}
+    data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
         for field in data:
             data[field].extend(d[field])
 
-    df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
+    print(f"Classifying {len(data['Title'])} papers with GPT-4o-mini...")
+    relevant_papers = classify_papers(client, data, keywords, test_mode=test_mode)
+    print(f"Found {len(relevant_papers)} relevant papers")
+
+    # Create GitHub issues for relevant papers
+    ensure_github_label()
+    for paper in relevant_papers:
+        create_github_issue(
+            paper["Title"],
+            paper["Abstract"],
+            paper["Authors"],
+            paper["Journal"],
+            paper["Link"],
+        )
 
     # Build recipient list - include second email if configured
     recipients = [os.environ.get("MY_EMAIL")]
@@ -316,7 +494,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
     body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
-    body += f"*Found {len(df)} relevant papers with cutoff {cutoff / 10:.2f}.*\n\n"
+    body += f"*Found {len(relevant_papers)} relevant papers.*\n\n"
     if len(biorxiv_errors) > 0:
         body += "*The following errors were encountered while scraping biorxiv/medrxiv/chemrxiv:*\n"
         for err in biorxiv_errors:
@@ -324,26 +502,26 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
         body += "\n"
     body += "---\n\n"
 
-    for _, row in df.iterrows():
-        title = row["Title"]
-        abstract = row["Abstract"]
-        journal = row["Journal"]
-        link = row["Link"]
-        prob = row["Relevance"]
+    for paper in relevant_papers:
+        title = paper["Title"]
+        abstract = paper["Abstract"]
+        journal = paper["Journal"]
+        link = paper["Link"]
+        authors = paper["Authors"]
         summary = summarize_abstract(client, title, abstract)
         # Add link to title if available
         if link:
             body += f"### [{title}]({link})\n\n"
         else:
             body += f"### {title}\n\n"
-        body += f"**Journal**: {journal}\n\n**Relevance**: {(10*prob):.2f}/10\n\n**Summary**: {summary}\n\n**Abstract**: {abstract}\n\n---\n\n"
+        body += f"**Authors**: {authors}\n\n"
+        body += f"**Venue**: {journal}\n\n"
+        body += f"**Summary**: {summary}\n\n"
+        body += f"**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
-    # message.attach(MIMEText(body, "plain"))
     message.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ.get("MY_EMAIL"), os.environ.get("MY_PW"))
-        server.sendmail(
-            os.environ.get("MY_EMAIL"), recipients, message.as_string()
-        )
+        server.sendmail(os.environ.get("MY_EMAIL"), recipients, message.as_string())
