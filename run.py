@@ -4,7 +4,6 @@ import json
 import os
 import re
 import smtplib
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -14,7 +13,7 @@ import arxivscraper
 import markdown
 import requests
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
 from pymed import PubMed
 
@@ -35,18 +34,6 @@ def load_keywords(filepath: str = "keywords.txt") -> list[str]:
         return [line.strip() for line in f if line.strip()]
 
 
-def openai_summary_prompt() -> str:
-    """Returns the prompt used for summarizing abstracts with OpenAI."""
-    return (
-        "You are a helpful assistant that summarizes scientific abstracts into plain english in a single sentence of no more than thirty words. "
-        "Do not use semicolons, parentheses, or any other syntax intended to extend a sentence. Keep it simple and concise. "
-        "If the study is a literature review, mention that. "
-        "If the study introduces a new method, and the name of the method is not in the title, mention the name of the method explicitly. "
-        "Prioritize mentioning the main findings of the study. Do not offer your own interpretation. "
-        "There is no need to be exhaustive about the contents of the study. Just broad highlights."
-    )
-
-
 def format_date(date, sep: str = "/") -> str:
     """Formats a datetime object into a string.
 
@@ -59,47 +46,6 @@ def format_date(date, sep: str = "/") -> str:
     """
     assert len(sep) == 1
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
-
-
-def _build_keyword_patterns(keywords: list[str]) -> list[re.Pattern]:
-    """Compile keyword phrases into word-boundary regex patterns for fast matching.
-
-    Each keyword is treated as a phrase whose individual tokens must appear
-    consecutively (case-insensitive, word-boundary delimited).
-
-    Args:
-        keywords: List of keyword phrases.
-
-    Returns:
-        A list of compiled regex patterns.
-    """
-    patterns = []
-    for kw in keywords:
-        # Escape each token and join with flexible whitespace
-        tokens = kw.strip().split()
-        regex = r"\b" + r"\s+".join(re.escape(t) for t in tokens) + r"\b"
-        patterns.append(re.compile(regex, re.IGNORECASE))
-    return patterns
-
-
-def keyword_prefilter(
-    title: str, abstract: str, patterns: list[re.Pattern]
-) -> bool:
-    """Return True if the title or abstract matches any keyword pattern.
-
-    This is a cheap local check used to avoid sending obviously-irrelevant
-    papers to the LLM.
-
-    Args:
-        title: The paper title.
-        abstract: The paper abstract.
-        patterns: Pre-compiled keyword regex patterns.
-
-    Returns:
-        True if any keyword pattern matches, False otherwise.
-    """
-    text = f"{title} {abstract}"
-    return any(p.search(text) for p in patterns)
 
 
 def deduplicate_papers(data: dict[str, list]) -> dict[str, list]:
@@ -178,8 +124,7 @@ def classify_papers(
 ) -> list[dict]:
     """Classify papers using gpt-5-nano and return relevant ones.
 
-    Papers are first filtered by word count and keyword pre-filter, then
-    sent to the LLM in concurrent batches.
+    Sends requests in concurrent batches for speed.
 
     Args:
         async_client: An instance of the async OpenAI client.
@@ -191,21 +136,16 @@ def classify_papers(
     Returns:
         A list of dicts, each representing a relevant paper.
     """
-    keyword_patterns = _build_keyword_patterns(keywords)
 
     async def _classify_all() -> list[dict]:
-        # Collect papers that pass word-count and keyword pre-filters
+        # Collect papers that pass the word-count filter
         candidates = []
         links = data.get("Link", [""] * len(data["Title"]))
         authors_list = data.get("Authors", [""] * len(data["Title"]))
-        skipped_prefilter = 0
         for title, abstract, journal, link, authors in zip(
             data["Title"], data["Abstract"], data["Journal"], links, authors_list
         ):
             if len(abstract.split()) < 100:
-                continue
-            if not keyword_prefilter(title, abstract, keyword_patterns):
-                skipped_prefilter += 1
                 continue
             candidates.append(
                 {
@@ -216,10 +156,6 @@ def classify_papers(
                     "Authors": authors,
                 }
             )
-        print(
-            f"  Keyword pre-filter: {skipped_prefilter} papers skipped, "
-            f"{len(candidates)} candidates sent to LLM"
-        )
 
         relevant = []
         for i in range(0, len(candidates), batch_size):
@@ -323,65 +259,6 @@ def create_github_issue(
     except Exception as e:
         print(f"Failed to create issue for '{title}': {e}")
         return False
-
-
-async def summarize_abstract(
-    client: AsyncOpenAI, title: str, abstract: str
-) -> str:
-    """Summarize an abstract into a single sentence using the OpenAI API.
-
-    Args:
-        client: An instance of the async OpenAI client.
-        title: The paper title.
-        abstract: The abstract text to summarize.
-
-    Returns:
-        A concise summary of the abstract.
-    """
-    response = await client.chat.completions.create(
-        model="gpt-5-nano",
-        messages=[
-            {
-                "role": "system",
-                "content": openai_summary_prompt(),
-            },
-            {
-                "role": "user",
-                "content": f"Title of the study: {title}; Abstract: {abstract}",
-            },
-        ],
-    )
-    if not response.choices:
-        return "Summary not available."
-    return response.choices[0].message.content.strip()
-
-
-async def summarize_papers(
-    client: AsyncOpenAI, papers: list[dict], batch_size: int = 20
-) -> list[str]:
-    """Summarize a list of papers in async batches.
-
-    Args:
-        client: An instance of the async OpenAI client.
-        papers: List of paper dicts with Title and Abstract keys.
-        batch_size: Number of concurrent summarization requests per batch.
-
-    Returns:
-        A list of summary strings in the same order as the input papers.
-    """
-    summaries: list[str] = []
-    for i in range(0, len(papers), batch_size):
-        batch = papers[i : i + batch_size]
-        batch_summaries = await asyncio.gather(
-            *[
-                summarize_abstract(client, p["Title"], p["Abstract"])
-                for p in batch
-            ]
-        )
-        summaries.extend(batch_summaries)
-        if i + batch_size < len(papers):
-            await asyncio.sleep(2)
-    return summaries
 
 
 def scrape_arxiv(
@@ -592,7 +469,6 @@ def main(n_days: int, test_mode: bool = False) -> None:
     """
 
     api_key = os.environ.get("OPENAI_API_KEY")
-    client = OpenAI(api_key=api_key)
     async_client = AsyncOpenAI(api_key=api_key)
 
     env_vars_set = {
@@ -660,11 +536,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         body += "\n"
     body += "---\n\n"
 
-    # Summarize all relevant papers in async batches
-    print(f"Summarizing {len(relevant_papers)} papers...")
-    summaries = asyncio.run(summarize_papers(async_client, relevant_papers))
-
-    for paper, summary in zip(relevant_papers, summaries):
+    for paper in relevant_papers:
         title = paper["Title"]
         abstract = paper["Abstract"]
         journal = paper["Journal"]
@@ -677,7 +549,6 @@ def main(n_days: int, test_mode: bool = False) -> None:
             body += f"### {title}\n\n"
         body += f"**Authors**: {authors}\n\n"
         body += f"**Venue**: {journal}\n\n"
-        body += f"**Summary**: {summary}\n\n"
         body += f"**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)

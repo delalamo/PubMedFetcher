@@ -16,15 +16,11 @@ The GitHub Action workflow calls these two phases with a polling loop in between
 """
 
 import argparse
-import asyncio
-import contextlib
 import json
 import os
-import re
 import smtplib
 import sys
 import tempfile
-import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -32,18 +28,14 @@ from email.mime.text import MIMEText
 import markdown
 import requests
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+from openai import OpenAI
 
 from run import (
     deduplicate_papers,
     ensure_github_label,
     create_github_issue,
     load_keywords,
-    openai_summary_prompt,
     scrape_all_sources,
-    summarize_papers,
-    _build_keyword_patterns,
-    keyword_prefilter,
 )
 
 load_dotenv()
@@ -105,8 +97,7 @@ def submit(n_days: int, test_mode: bool = False) -> str:
     after_dedup = len(data["Title"])
     print(f"Deduplicated: {before_dedup} -> {after_dedup} papers")
 
-    # --- Pre-filter ---
-    keyword_patterns = _build_keyword_patterns(keywords)
+    # --- Filter by word count ---
     candidates: list[dict] = []
     links = data.get("Link", [""] * len(data["Title"]))
     authors_list = data.get("Authors", [""] * len(data["Title"]))
@@ -114,8 +105,6 @@ def submit(n_days: int, test_mode: bool = False) -> str:
         data["Title"], data["Abstract"], data["Journal"], links, authors_list
     ):
         if len(abstract.split()) < 100:
-            continue
-        if not keyword_prefilter(title, abstract, keyword_patterns):
             continue
         candidates.append(
             {
@@ -126,7 +115,7 @@ def submit(n_days: int, test_mode: bool = False) -> str:
                 "Authors": authors,
             }
         )
-    print(f"Pre-filter: {len(candidates)} candidates for classification")
+    print(f"{len(candidates)} candidates for classification")
 
     if test_mode:
         candidates = candidates[:50]
@@ -195,7 +184,6 @@ def collect(batch_id: str, test_mode: bool = False) -> None:
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     client = OpenAI(api_key=api_key)
-    async_client = AsyncOpenAI(api_key=api_key)
 
     env_vars_set = {
         x: bool(os.environ.get(x)) for x in ["MY_EMAIL", "MY_PW", "OPENAI_API_KEY"]
@@ -287,11 +275,7 @@ def collect(batch_id: str, test_mode: bool = False) -> None:
         body += "\n"
     body += "---\n\n"
 
-    # Summarize in async batches
-    print(f"Summarizing {len(relevant_papers)} papers...")
-    summaries = asyncio.run(summarize_papers(async_client, relevant_papers))
-
-    for paper, summary in zip(relevant_papers, summaries):
+    for paper in relevant_papers:
         title = paper["Title"]
         abstract = paper["Abstract"]
         journal = paper["Journal"]
@@ -303,7 +287,6 @@ def collect(batch_id: str, test_mode: bool = False) -> None:
             body += f"### {title}\n\n"
         body += f"**Authors**: {authors}\n\n"
         body += f"**Venue**: {journal}\n\n"
-        body += f"**Summary**: {summary}\n\n"
         body += f"**Abstract**: {abstract}\n\n---\n\n"
 
     html_body = markdown.markdown(body)
