@@ -2,8 +2,10 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import smtplib
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -59,6 +61,69 @@ def format_date(date, sep: str = "/") -> str:
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
+def _build_keyword_patterns(keywords: list[str]) -> list[re.Pattern]:
+    """Compile keyword phrases into word-boundary regex patterns for fast matching.
+
+    Each keyword is treated as a phrase whose individual tokens must appear
+    consecutively (case-insensitive, word-boundary delimited).
+
+    Args:
+        keywords: List of keyword phrases.
+
+    Returns:
+        A list of compiled regex patterns.
+    """
+    patterns = []
+    for kw in keywords:
+        # Escape each token and join with flexible whitespace
+        tokens = kw.strip().split()
+        regex = r"\b" + r"\s+".join(re.escape(t) for t in tokens) + r"\b"
+        patterns.append(re.compile(regex, re.IGNORECASE))
+    return patterns
+
+
+def keyword_prefilter(
+    title: str, abstract: str, patterns: list[re.Pattern]
+) -> bool:
+    """Return True if the title or abstract matches any keyword pattern.
+
+    This is a cheap local check used to avoid sending obviously-irrelevant
+    papers to the LLM.
+
+    Args:
+        title: The paper title.
+        abstract: The paper abstract.
+        patterns: Pre-compiled keyword regex patterns.
+
+    Returns:
+        True if any keyword pattern matches, False otherwise.
+    """
+    text = f"{title} {abstract}"
+    return any(p.search(text) for p in patterns)
+
+
+def deduplicate_papers(data: dict[str, list]) -> dict[str, list]:
+    """Remove duplicate papers based on normalized title.
+
+    Args:
+        data: Dictionary with keys Title, Abstract, Journal, Link, Authors.
+
+    Returns:
+        A new dictionary with duplicates removed (first occurrence kept).
+    """
+    seen: set[str] = set()
+    out: dict[str, list] = {k: [] for k in data}
+    for i in range(len(data["Title"])):
+        # Normalize: lowercase, strip whitespace/punctuation for comparison
+        key = re.sub(r"[^a-z0-9 ]", "", data["Title"][i].lower()).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        for field in data:
+            out[field].append(data[field][i])
+    return out
+
+
 async def classify_paper(
     client: AsyncOpenAI, title: str, abstract: str, keywords: list[str]
 ) -> bool:
@@ -109,11 +174,12 @@ def classify_papers(
     data: dict[str, list],
     keywords: list[str],
     test_mode: bool = False,
-    batch_size: int = 20,
+    batch_size: int = 50,
 ) -> list[dict]:
     """Classify papers using gpt-5-nano and return relevant ones.
 
-    Sends requests in concurrent batches for speed.
+    Papers are first filtered by word count and keyword pre-filter, then
+    sent to the LLM in concurrent batches.
 
     Args:
         async_client: An instance of the async OpenAI client.
@@ -125,16 +191,21 @@ def classify_papers(
     Returns:
         A list of dicts, each representing a relevant paper.
     """
+    keyword_patterns = _build_keyword_patterns(keywords)
 
     async def _classify_all() -> list[dict]:
-        # Collect papers that pass the word-count filter
+        # Collect papers that pass word-count and keyword pre-filters
         candidates = []
         links = data.get("Link", [""] * len(data["Title"]))
         authors_list = data.get("Authors", [""] * len(data["Title"]))
+        skipped_prefilter = 0
         for title, abstract, journal, link, authors in zip(
             data["Title"], data["Abstract"], data["Journal"], links, authors_list
         ):
             if len(abstract.split()) < 100:
+                continue
+            if not keyword_prefilter(title, abstract, keyword_patterns):
+                skipped_prefilter += 1
                 continue
             candidates.append(
                 {
@@ -145,6 +216,10 @@ def classify_papers(
                     "Authors": authors,
                 }
             )
+        print(
+            f"  Keyword pre-filter: {skipped_prefilter} papers skipped, "
+            f"{len(candidates)} candidates sent to LLM"
+        )
 
         relevant = []
         for i in range(0, len(candidates), batch_size):
@@ -160,9 +235,9 @@ def classify_papers(
                     relevant.append(paper)
             if test_mode and len(relevant) >= 5:
                 return relevant[:5]
-            # Stagger batches to avoid hitting the TPM rate limit
+            # Brief pause between batches to stay within TPM limits
             if i + batch_size < len(candidates):
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
         return relevant
 
     return asyncio.run(_classify_all())
@@ -250,18 +325,20 @@ def create_github_issue(
         return False
 
 
-def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
+async def summarize_abstract(
+    client: AsyncOpenAI, title: str, abstract: str
+) -> str:
     """Summarize an abstract into a single sentence using the OpenAI API.
 
     Args:
-        client: An instance of the OpenAI client.
+        client: An instance of the async OpenAI client.
         title: The paper title.
         abstract: The abstract text to summarize.
 
     Returns:
         A concise summary of the abstract.
     """
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model="gpt-5-nano",
         messages=[
             {
@@ -277,6 +354,34 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
     if not response.choices:
         return "Summary not available."
     return response.choices[0].message.content.strip()
+
+
+async def summarize_papers(
+    client: AsyncOpenAI, papers: list[dict], batch_size: int = 20
+) -> list[str]:
+    """Summarize a list of papers in async batches.
+
+    Args:
+        client: An instance of the async OpenAI client.
+        papers: List of paper dicts with Title and Abstract keys.
+        batch_size: Number of concurrent summarization requests per batch.
+
+    Returns:
+        A list of summary strings in the same order as the input papers.
+    """
+    summaries: list[str] = []
+    for i in range(0, len(papers), batch_size):
+        batch = papers[i : i + batch_size]
+        batch_summaries = await asyncio.gather(
+            *[
+                summarize_abstract(client, p["Title"], p["Abstract"])
+                for p in batch
+            ]
+        )
+        summaries.extend(batch_summaries)
+        if i + batch_size < len(papers):
+            await asyncio.sleep(2)
+    return summaries
 
 
 def scrape_arxiv(
@@ -457,6 +562,26 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     return data, ""
 
 
+def scrape_all_sources(n_days: int) -> tuple[dict[str, list], dict[str, list], dict[str, list], list[str]]:
+    """Scrape PubMed, bioRxiv, and arXiv in parallel using threads.
+
+    Args:
+        n_days: The number of days to look back.
+
+    Returns:
+        A tuple of (pubmed_data, biorxiv_data, arxiv_data, biorxiv_errors).
+    """
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        fut_pubmed = pool.submit(scrape_pubmed, n_days)
+        fut_biorxiv = pool.submit(scrape_biorxiv, n_days)
+        fut_arxiv = pool.submit(scrape_arxiv, n_days)
+
+    data_pubmed, _ = fut_pubmed.result()
+    data_biorxiv, biorxiv_errors = fut_biorxiv.result()
+    data_arxiv, _ = fut_arxiv.result()
+    return data_pubmed, data_biorxiv, data_arxiv, biorxiv_errors
+
+
 def main(n_days: int, test_mode: bool = False) -> None:
     """Scrapes papers, classifies them with gpt-5-nano, creates GitHub issues,
     and sends an email digest.
@@ -483,14 +608,19 @@ def main(n_days: int, test_mode: bool = False) -> None:
     keywords = load_keywords()
     print(f"Loaded {len(keywords)} keywords")
 
-    data_pubmed, _ = scrape_pubmed(n_days)
-    data_biorxiv, biorxiv_errors = scrape_biorxiv(n_days)
-    data_arxiv, _ = scrape_arxiv(n_days)
+    # Scrape all sources in parallel
+    data_pubmed, data_biorxiv, data_arxiv, biorxiv_errors = scrape_all_sources(n_days)
 
     data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
     for d in [data_pubmed, data_biorxiv, data_arxiv]:
         for field in data:
             data[field].extend(d[field])
+
+    # Deduplicate papers by normalized title
+    before_dedup = len(data["Title"])
+    data = deduplicate_papers(data)
+    after_dedup = len(data["Title"])
+    print(f"Deduplicated: {before_dedup} -> {after_dedup} papers ({before_dedup - after_dedup} duplicates removed)")
 
     print(f"Classifying {len(data['Title'])} papers with gpt-5-nano...")
     relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode)
@@ -530,15 +660,16 @@ def main(n_days: int, test_mode: bool = False) -> None:
         body += "\n"
     body += "---\n\n"
 
-    for paper in relevant_papers:
+    # Summarize all relevant papers in async batches
+    print(f"Summarizing {len(relevant_papers)} papers...")
+    summaries = asyncio.run(summarize_papers(async_client, relevant_papers))
+
+    for paper, summary in zip(relevant_papers, summaries):
         title = paper["Title"]
         abstract = paper["Abstract"]
         journal = paper["Journal"]
         link = paper["Link"]
         authors = paper["Authors"]
-        # Stagger summarization calls to avoid hitting the TPM rate limit
-        time.sleep(2)
-        summary = summarize_abstract(client, title, abstract)
         # Add link to title if available
         if link:
             body += f"### [{title}]({link})\n\n"

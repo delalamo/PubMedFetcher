@@ -1,0 +1,109 @@
+name: Run fetching script (Batch API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_days:
+        description: "Number of days to look back"
+        required: false
+        default: "1"
+      test_mode:
+        description: "Run in test mode (limit candidates)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+
+jobs:
+  batch-classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libxml build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Scrape papers and submit batch
+        id: submit
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          TEST_FLAG=""
+          if [ "${{ inputs.test_mode }}" = "true" ]; then
+            TEST_FLAG="--test-mode"
+          fi
+          OUTPUT=$(python batch_run.py submit --n-days ${{ inputs.n_days }} $TEST_FLAG)
+          echo "$OUTPUT"
+          BATCH_ID=$(echo "$OUTPUT" | grep "^BATCH_ID=" | cut -d= -f2)
+          echo "batch_id=$BATCH_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload candidates artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-candidates
+          path: |
+            batch_candidates.json
+            batch_metadata.json
+          retention-days: 3
+
+      - name: Poll for batch completion
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          BATCH_ID="${{ steps.submit.outputs.batch_id }}"
+          echo "Polling batch $BATCH_ID..."
+          for i in $(seq 1 60); do
+            STATUS=$(python -c "
+          from openai import OpenAI
+          import os
+          client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
+          batch = client.batches.retrieve('$BATCH_ID')
+          print(batch.status)
+          ")
+            echo "Attempt $i: status=$STATUS"
+            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "expired" ] || [ "$STATUS" = "cancelled" ]; then
+              echo "batch_status=$STATUS" >> "$GITHUB_ENV"
+              break
+            fi
+            # Wait 5 minutes between polls
+            sleep 300
+          done
+
+      - name: Collect results and send digest
+        if: env.batch_status == 'completed'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MY_EMAIL: ${{ secrets.MY_EMAIL }}
+          MY_PW: ${{ secrets.MY_PW }}
+          MY_EMAIL_2: ${{ secrets.MY_EMAIL_2 }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          TEST_FLAG=""
+          if [ "${{ inputs.test_mode }}" = "true" ]; then
+            TEST_FLAG="--test-mode"
+          fi
+          python batch_run.py collect --batch-id "${{ steps.submit.outputs.batch_id }}" $TEST_FLAG
+
+      - name: Report batch failure
+        if: env.batch_status != 'completed' && env.batch_status != ''
+        run: |
+          echo "::error::Batch finished with status: ${{ env.batch_status }}"
+          exit 1
