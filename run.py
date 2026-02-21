@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import json
 import os
@@ -10,7 +11,7 @@ import arxivscraper
 import markdown
 import requests
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
 from pymed import PubMed
 
@@ -57,13 +58,13 @@ def format_date(date, sep: str = "/") -> str:
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
-def classify_paper(
-    client: OpenAI, title: str, abstract: str, keywords: list[str]
+async def classify_paper(
+    client: AsyncOpenAI, title: str, abstract: str, keywords: list[str]
 ) -> bool:
     """Classify a paper as relevant or not using GPT-4o-mini.
 
     Args:
-        client: An instance of the OpenAI client.
+        client: An instance of the async OpenAI client.
         title: The paper title.
         abstract: The paper abstract.
         keywords: List of keyword phrases defining research interests.
@@ -72,7 +73,7 @@ def classify_paper(
         True if the paper is classified as relevant, False otherwise.
     """
     keywords_str = "\n".join(f"- {kw}" for kw in keywords)
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {
@@ -103,32 +104,38 @@ def classify_paper(
 
 
 def classify_papers(
-    client: OpenAI,
+    async_client: AsyncOpenAI,
     data: dict[str, list],
     keywords: list[str],
     test_mode: bool = False,
+    batch_size: int = 20,
 ) -> list[dict]:
     """Classify papers using GPT-4o-mini and return relevant ones.
 
+    Sends requests in concurrent batches for speed.
+
     Args:
-        client: An instance of the OpenAI client.
+        async_client: An instance of the async OpenAI client.
         data: A dictionary containing paper data (Title, Abstract, Journal, Link, Authors).
         keywords: List of keyword phrases defining research interests.
         test_mode: If True, stop after finding 5 relevant papers.
+        batch_size: Number of concurrent classification requests per batch.
 
     Returns:
         A list of dicts, each representing a relevant paper.
     """
-    relevant = []
-    links = data.get("Link", [""] * len(data["Title"]))
-    authors_list = data.get("Authors", [""] * len(data["Title"]))
-    for title, abstract, journal, link, authors in zip(
-        data["Title"], data["Abstract"], data["Journal"], links, authors_list
-    ):
-        if len(abstract.split()) < 100:
-            continue
-        if classify_paper(client, title, abstract, keywords):
-            relevant.append(
+
+    async def _classify_all() -> list[dict]:
+        # Collect papers that pass the word-count filter
+        candidates = []
+        links = data.get("Link", [""] * len(data["Title"]))
+        authors_list = data.get("Authors", [""] * len(data["Title"]))
+        for title, abstract, journal, link, authors in zip(
+            data["Title"], data["Abstract"], data["Journal"], links, authors_list
+        ):
+            if len(abstract.split()) < 100:
+                continue
+            candidates.append(
                 {
                     "Title": title,
                     "Abstract": abstract,
@@ -137,9 +144,24 @@ def classify_papers(
                     "Authors": authors,
                 }
             )
-        if test_mode and len(relevant) >= 5:
-            break
-    return relevant
+
+        relevant = []
+        for i in range(0, len(candidates), batch_size):
+            batch = candidates[i : i + batch_size]
+            results = await asyncio.gather(
+                *[
+                    classify_paper(async_client, p["Title"], p["Abstract"], keywords)
+                    for p in batch
+                ]
+            )
+            for paper, is_relevant in zip(batch, results):
+                if is_relevant:
+                    relevant.append(paper)
+            if test_mode and len(relevant) >= 5:
+                return relevant[:5]
+        return relevant
+
+    return asyncio.run(_classify_all())
 
 
 def ensure_github_label() -> None:
@@ -440,7 +462,9 @@ def main(n_days: int, test_mode: bool = False) -> None:
         test_mode: If True, stop after finding 5 relevant papers.
     """
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    api_key = os.environ.get("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key)
+    async_client = AsyncOpenAI(api_key=api_key)
 
     env_vars_set = {
         x: bool(os.environ.get(x)) for x in ["MY_EMAIL", "MY_PW", "OPENAI_API_KEY"]
@@ -465,7 +489,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
             data[field].extend(d[field])
 
     print(f"Classifying {len(data['Title'])} papers with GPT-4o-mini...")
-    relevant_papers = classify_papers(client, data, keywords, test_mode=test_mode)
+    relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode)
     print(f"Found {len(relevant_papers)} relevant papers")
 
     # Create GitHub issues for relevant papers
