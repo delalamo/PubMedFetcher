@@ -3,6 +3,7 @@ import contextlib
 import json
 import os
 import smtplib
+import time
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -159,6 +160,9 @@ def classify_papers(
                     relevant.append(paper)
             if test_mode and len(relevant) >= 5:
                 return relevant[:5]
+            # Stagger batches to avoid hitting the TPM rate limit
+            if i + batch_size < len(candidates):
+                await asyncio.sleep(5)
         return relevant
 
     return asyncio.run(_classify_all())
@@ -532,6 +536,8 @@ def main(n_days: int, test_mode: bool = False) -> None:
         journal = paper["Journal"]
         link = paper["Link"]
         authors = paper["Authors"]
+        # Stagger summarization calls to avoid hitting the TPM rate limit
+        time.sleep(2)
         summary = summarize_abstract(client, title, abstract)
         # Add link to title if available
         if link:
