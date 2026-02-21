@@ -12,7 +12,7 @@ import arxivscraper
 import markdown
 import requests
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, OpenAI, RateLimitError
 from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
 from pymed import PubMed
 
@@ -74,34 +74,41 @@ async def classify_paper(
         True if the paper is classified as relevant, False otherwise.
     """
     keywords_str = "\n".join(f"- {kw}" for kw in keywords)
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a scientific paper classifier. Given a paper's title and abstract, "
-                    "and a list of research topics/keywords, determine if the paper is relevant to "
-                    "any of the listed topics. A paper is relevant if its primary focus or a major "
-                    "contribution relates to one or more of the topics. Respond with ONLY the word "
-                    "'relevant' or 'not relevant'. Do not include any other text."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Research topics/keywords:\n{keywords_str}\n\n"
-                    f"Paper title: {title}\n\n"
-                    f"Paper abstract: {abstract}"
-                ),
-            },
-        ],
-        max_tokens=10,
-    )
-    if not response.choices:
-        return False
-    result = response.choices[0].message.content.strip().lower()
-    return "not relevant" not in result and "relevant" in result
+    delay = 5
+    while True:
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a scientific paper classifier. Given a paper's title and abstract, "
+                            "and a list of research topics/keywords, determine if the paper is relevant to "
+                            "any of the listed topics. A paper is relevant if its primary focus or a major "
+                            "contribution relates to one or more of the topics. Respond with ONLY the word "
+                            "'relevant' or 'not relevant'. Do not include any other text."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Research topics/keywords:\n{keywords_str}\n\n"
+                            f"Paper title: {title}\n\n"
+                            f"Paper abstract: {abstract}"
+                        ),
+                    },
+                ],
+                max_tokens=10,
+            )
+            if not response.choices:
+                return False
+            result = response.choices[0].message.content.strip().lower()
+            return "not relevant" not in result and "relevant" in result
+        except RateLimitError as e:
+            print(f"Rate limit hit while classifying paper, retrying in {delay}s: {e}")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
 
 
 def classify_papers(
@@ -109,18 +116,17 @@ def classify_papers(
     data: dict[str, list],
     keywords: list[str],
     test_mode: bool = False,
-    batch_size: int = 20,
 ) -> list[dict]:
     """Classify papers using GPT-4o-mini and return relevant ones.
 
-    Sends requests in concurrent batches for speed.
+    Submits papers one at a time with a stagger delay to avoid TPM rate limits.
+    Automatically retries with exponential backoff on RateLimitError.
 
     Args:
         async_client: An instance of the async OpenAI client.
         data: A dictionary containing paper data (Title, Abstract, Journal, Link, Authors).
         keywords: List of keyword phrases defining research interests.
         test_mode: If True, stop after finding 5 relevant papers.
-        batch_size: Number of concurrent classification requests per batch.
 
     Returns:
         A list of dicts, each representing a relevant paper.
@@ -147,22 +153,17 @@ def classify_papers(
             )
 
         relevant = []
-        for i in range(0, len(candidates), batch_size):
-            batch = candidates[i : i + batch_size]
-            results = await asyncio.gather(
-                *[
-                    classify_paper(async_client, p["Title"], p["Abstract"], keywords)
-                    for p in batch
-                ]
+        for i, paper in enumerate(candidates):
+            is_relevant = await classify_paper(
+                async_client, paper["Title"], paper["Abstract"], keywords
             )
-            for paper, is_relevant in zip(batch, results):
-                if is_relevant:
-                    relevant.append(paper)
+            if is_relevant:
+                relevant.append(paper)
             if test_mode and len(relevant) >= 5:
                 return relevant[:5]
-            # Stagger batches to avoid hitting the TPM rate limit
-            if i + batch_size < len(candidates):
-                await asyncio.sleep(5)
+            # Stagger individual requests to avoid hitting the TPM rate limit
+            if i + 1 < len(candidates):
+                await asyncio.sleep(1)
         return relevant
 
     return asyncio.run(_classify_all())
@@ -261,22 +262,29 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
     Returns:
         A concise summary of the abstract.
     """
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": openai_summary_prompt(),
-            },
-            {
-                "role": "user",
-                "content": f"Title of the study: {title}; Abstract: {abstract}",
-            },
-        ],
-    )
-    if not response.choices:
-        return "Summary not available."
-    return response.choices[0].message.content.strip()
+    delay = 5
+    while True:
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": openai_summary_prompt(),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Title of the study: {title}; Abstract: {abstract}",
+                    },
+                ],
+            )
+            if not response.choices:
+                return "Summary not available."
+            return response.choices[0].message.content.strip()
+        except RateLimitError as e:
+            print(f"Rate limit hit while summarizing, retrying in {delay}s: {e}")
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
 
 
 def scrape_arxiv(
