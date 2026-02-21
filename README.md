@@ -1,53 +1,81 @@
-# PubMedFetcher
+# PubMedFetcher: Automated research paper discovery
 
-This repo fetches new papers every day and uses GPT-4o-mini to classify them as relevant or not based on a configurable list of keywords. Relevant papers are:
+This repo scrapes new papers every day from five preprint and publication sources, uses GPT-4o-mini to decide which ones match your research interests, and delivers the results to you — no manual searching required.
 
-1. Filed as **GitHub Issues** with the title, authors, venue, abstract, and link/DOI
-2. Emailed as an **HTML digest** with AI-generated summaries
+## What it does
 
-The workflow runs daily via GitHub Actions. It scrapes abstracts from biorxiv, chemrxiv, medrxiv, arXiv (q-bio, cond-mat, and stats sections), and PubMed. Each paper's title and abstract are sent to GPT-4o-mini along with your keywords to determine relevance. Relevant papers are then summarized and delivered to you.
+Every day a GitHub Actions workflow:
+
+1. **Scrapes** new papers from **PubMed**, **arXiv** (q-bio, cond-mat, and stats sections), **bioRxiv**, **medRxiv**, and **chemRxiv**.
+2. **Classifies** each paper by sending its title and abstract, along with your keywords, to **GPT-4o-mini**. Papers whose topics match your keywords are marked as relevant.
+3. **Creates a GitHub Issue** for every relevant paper containing the title, authors, venue, abstract, and a link or DOI.
+4. **Emails you an HTML digest** with a one-sentence AI-generated summary of each relevant paper.
+
+All you need to provide is an OpenAI API key, a Gmail address for email delivery, and a list of keywords that describe the topics you care about.
 
 ## How to use this repo
 
-1. **Fork this repo**
-2. **Edit `keywords.txt`** in the repo root to list your research interests, one per line. For example:
-   ```
-   protein design
-   protein language models
-   antibody bioinformatics
-   ```
-3. **Add the following secrets** under Settings > Secrets and variables > Actions:
-   | Secret | Required | Description |
-   |--------|----------|-------------|
-   | `OPENAI_API_KEY` | Yes | OpenAI API key for GPT-4o-mini classification and summarization |
-   | `MY_EMAIL` | Yes | Your Gmail address (used as sender and recipient) |
-   | `MY_PW` | Yes | A Gmail [app password](https://support.google.com/accounts/answer/185833) (not your actual email password) |
-   | `MY_EMAIL_2` | No | A second email address to also receive the daily digest |
+Follow these steps to set up your own personal paper feed:
 
-4. **Ensure Actions are enabled** in your fork (Settings > Actions > General > Allow all actions)
+### 1. Fork the repository
 
-That's it. The workflow runs daily at midnight UTC. You can also trigger it manually from the Actions tab.
+Click **Fork** at the top of this page to create your own copy.
+
+### 2. Edit `keywords.txt`
+
+Open `keywords.txt` in the root of your fork and replace the contents with your own research interests, one keyword or phrase per line. For example:
+
+```
+CRISPR gene editing
+single-cell RNA sequencing
+spatial transcriptomics
+tumor microenvironment
+```
+
+These keywords are sent to GPT-4o-mini alongside each paper's title and abstract so the model can judge relevance. Be as specific or as broad as you like — the model understands natural-language descriptions of research topics. This costs about ~$0.10 per day in OpenAI credits.
+
+### 3. Add repository secrets
+
+Go to your fork's **Settings → Secrets and variables → Actions** and add the following secrets:
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | An [OpenAI API key](https://platform.openai.com/api-keys) used for GPT-4o-mini classification and summarization |
+| `MY_EMAIL` | Yes | Your Gmail address (used as both sender and recipient) |
+| `MY_PW` | Yes | A Gmail [App Password](https://support.google.com/accounts/answer/185833) (not your regular Gmail password) |
+| `MY_EMAIL_2` | No | An optional second email address to receive the daily digest |
+
+### 4. Enable GitHub Actions
+
+Go to **Settings → Actions → General** and select **Allow all actions and reusable workflows**.
+
+### 5. Test it
+
+Go to the **Actions** tab, select the **Test fetching script on reduced input set** workflow, and click **Run workflow**. This runs the full pipeline but stops after finding 5 relevant papers so you can verify everything works without waiting for the full run.
+
+### 6. You're done
+
+The main workflow runs automatically every day at **midnight UTC**. You can also trigger it manually from the **Actions** tab at any time. Relevant papers will appear as GitHub Issues in your fork and land in your inbox as an email digest.
 
 ## How it works
 
-1. **Scrape** papers from PubMed, arXiv, biorxiv, medrxiv, and chemrxiv
-2. **Classify** each paper by sending its title and abstract along with your keywords to GPT-4o-mini
-3. **Create GitHub Issues** for each relevant paper (with title, authors, venue, link, and abstract)
-4. **Email a digest** with AI-generated summaries of each relevant paper
+The core pipeline lives in `run.py` and is orchestrated by a GitHub Actions workflow (`.github/workflows/submit_jobs.yml`):
 
-## Customization
+1. **Scraping** — Papers from the last day are fetched from PubMed (via `pymed`), arXiv (via `arxivscraper`), and bioRxiv/medRxiv/chemRxiv (via `paperscraper`). Abstracts shorter than 100 words are filtered out as likely incomplete.
+2. **Classification** — Each paper's title and abstract are sent to GPT-4o-mini in concurrent batches of 20 along with your keywords from `keywords.txt`. The model returns a binary relevant / not-relevant decision.
+3. **Issue creation** — For each relevant paper, the script calls the GitHub API to open an issue labeled `paper` containing the full metadata and abstract.
+4. **Email digest** — Relevant papers are summarized into single sentences by GPT-4o-mini and compiled into an HTML email sent via Gmail SMTP.
 
-- **Keywords**: Edit `keywords.txt` — one keyword or phrase per line
-- **arXiv categories**: Modify the `categories` default in `scrape_arxiv()` in `run.py`
-- **Summarization style**: Modify `openai_summary_prompt()` in `run.py`
-- **Schedule**: Edit the cron expression in `.github/workflows/submit_jobs.yml`
-
-## Testing
-
-Trigger the test workflow manually from the Actions tab. It runs the same pipeline but stops after finding 5 relevant papers.
+## Local development
 
 ```bash
-# Run tests locally
 pip install -r requirements.txt
 pytest
+```
+
+You can also run the pipeline locally by setting the required environment variables (`OPENAI_API_KEY`, `MY_EMAIL`, `MY_PW`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`) and calling:
+
+```python
+from run import main
+main(1, test_mode=True)
 ```
