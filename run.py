@@ -62,7 +62,7 @@ def format_date(date, sep: str = "/") -> str:
 async def classify_paper(
     client: AsyncOpenAI, title: str, abstract: str, keywords: list[str]
 ) -> bool:
-    """Classify a paper as relevant or not using GPT-4o-mini.
+    """Classify a paper as relevant or not using gpt-5-nano.
 
     Args:
         client: An instance of the async OpenAI client.
@@ -75,7 +75,7 @@ async def classify_paper(
     """
     keywords_str = "\n".join(f"- {kw}" for kw in keywords)
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-nano",
         messages=[
             {
                 "role": "system",
@@ -111,7 +111,7 @@ def classify_papers(
     test_mode: bool = False,
     batch_size: int = 20,
 ) -> list[dict]:
-    """Classify papers using GPT-4o-mini and return relevant ones.
+    """Classify papers using gpt-5-nano and return relevant ones.
 
     Sends requests in concurrent batches for speed.
 
@@ -262,7 +262,7 @@ def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
         A concise summary of the abstract.
     """
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-nano",
         messages=[
             {
                 "role": "system",
@@ -458,7 +458,7 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
 
 
 def main(n_days: int, test_mode: bool = False) -> None:
-    """Scrapes papers, classifies them with GPT-4o-mini, creates GitHub issues,
+    """Scrapes papers, classifies them with gpt-5-nano, creates GitHub issues,
     and sends an email digest.
 
     Args:
@@ -492,7 +492,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         for field in data:
             data[field].extend(d[field])
 
-    print(f"Classifying {len(data['Title'])} papers with GPT-4o-mini...")
+    print(f"Classifying {len(data['Title'])} papers with gpt-5-nano...")
     relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode)
     print(f"Found {len(relevant_papers)} relevant papers")
 
