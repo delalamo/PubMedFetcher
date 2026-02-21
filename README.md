@@ -1,6 +1,6 @@
-# PubMedFetcher
+# PubMedFetcher: Automated research paper discovery
 
-**Automated, AI-powered paper discovery for researchers.** This repo scrapes new papers every day from five preprint and publication sources, uses GPT-4o-mini to decide which ones match your research interests, and delivers the results to you — no manual searching required.
+This repo scrapes new papers every day from five preprint and publication sources, uses GPT-4o-mini to decide which ones match your research interests, and delivers the results to you — no manual searching required.
 
 ## What it does
 
@@ -13,7 +13,7 @@ Every day a GitHub Actions workflow:
 
 All you need to provide is an OpenAI API key, a Gmail address for email delivery, and a list of keywords that describe the topics you care about.
 
-## Fork this repo to track your own topics
+## How to use this repo
 
 Follow these steps to set up your own personal paper feed:
 
@@ -32,7 +32,7 @@ spatial transcriptomics
 tumor microenvironment
 ```
 
-These keywords are sent to GPT-4o-mini alongside each paper's title and abstract so the model can judge relevance. Be as specific or as broad as you like — the model understands natural-language descriptions of research topics.
+These keywords are sent to GPT-4o-mini alongside each paper's title and abstract so the model can judge relevance. Be as specific or as broad as you like — the model understands natural-language descriptions of research topics. This costs about ~$0.10 per day in OpenAI credits.
 
 ### 3. Add repository secrets
 
@@ -65,14 +65,6 @@ The core pipeline lives in `run.py` and is orchestrated by a GitHub Actions work
 2. **Classification** — Each paper's title and abstract are sent to GPT-4o-mini in concurrent batches of 20 along with your keywords from `keywords.txt`. The model returns a binary relevant / not-relevant decision.
 3. **Issue creation** — For each relevant paper, the script calls the GitHub API to open an issue labeled `paper` containing the full metadata and abstract.
 4. **Email digest** — Relevant papers are summarized into single sentences by GPT-4o-mini and compiled into an HTML email sent via Gmail SMTP.
-
-## Customization
-
-- **Keywords**: Edit `keywords.txt` — one keyword or phrase per line.
-- **arXiv categories**: Change the `categories` default in `scrape_arxiv()` in `run.py` (e.g. add `"cs.AI"` or `"cs.LG"` for machine-learning papers).
-- **Summarization style**: Edit the prompt in `openai_summary_prompt()` in `run.py`.
-- **Schedule**: Change the cron expression in `.github/workflows/submit_jobs.yml` (default is `0 0 * * *`, midnight UTC).
-- **Look-back window**: Change the first argument to `main()` in the workflow file to fetch papers from more than 1 day back (e.g. `main(7)` for a weekly batch).
 
 ## Local development
 
