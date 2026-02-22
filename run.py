@@ -96,7 +96,7 @@ async def classify_paper(
                 ),
             },
         ],
-        max_tokens=10,
+        max_completion_tokens=10,
     )
     if not response.choices:
         return False
