@@ -340,7 +340,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
     error_msgs = []
     try:
         chemrxiv(
-            begin_date=format_date(start_rxivs, "-"),
+            start_date=format_date(start_rxivs, "-"),
             end_date=format_date(end_rxivs, "-"),
             save_path="chemrxiv.jsonl",
         )
@@ -348,7 +348,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
         error_msgs.append(f"Chemrxiv scrape failed with error {e}. Continuing...")
     try:
         medrxiv(
-            begin_date=format_date(start_rxivs, "-"),
+            start_date=format_date(start_rxivs, "-"),
             end_date=format_date(end_rxivs, "-"),
             save_path="medrxiv.jsonl",
         )
@@ -356,7 +356,7 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
         error_msgs.append(f"Medrxiv scrape failed with error {e}. Continuing...")
     try:
         biorxiv(
-            begin_date=format_date(start_rxivs, "-"),
+            start_date=format_date(start_rxivs, "-"),
             end_date=format_date(end_rxivs, "-"),
             save_path="biorxiv.jsonl",
         )
