@@ -1,4 +1,4 @@
-arxivscraper
+arxiv
 markdown
 openai
 paperscraper

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import arxivscraper
+import arxiv
 import markdown
 import requests
 from dotenv import load_dotenv
@@ -295,31 +295,24 @@ def scrape_arxiv(
         categories = ["q-bio", "cond-mat", "stat"]
     print("Scraping arxiv")
     data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": []}
-    start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y-%m-%d")
-    end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y%m%d")
+    end = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
+    client = arxiv.Client()
     for cat in categories:
-        scraper = arxivscraper.Scraper(category=cat, date_from=start, date_until=end)
-
-        arxiv_papers = scraper.scrape()
-
-        # Indicates failure
-        if arxiv_papers is None or arxiv_papers == 1 or len(arxiv_papers) == 0:
-            return data, ""
-        for paper in arxiv_papers:
-            data["Title"].append(paper["title"])
-            data["Abstract"].append(paper["abstract"].replace("\n", " "))
+        query = f"cat:{cat} AND submittedDate:[{start}0000 TO {end}2359]"
+        search = arxiv.Search(
+            query=query,
+            max_results=1000,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        for result in client.results(search):
+            data["Title"].append(result.title)
+            data["Abstract"].append(result.summary.replace("\n", " "))
             data["Journal"].append("arXiv")
-            # Construct arXiv link from paper ID
-            arxiv_id = paper.get("id", "")
-            if arxiv_id:
-                data["Link"].append(f"https://arxiv.org/abs/{arxiv_id}")
-            else:
-                data["Link"].append("")
-            # Extract authors
-            authors = paper.get("authors", "")
-            if isinstance(authors, list):
-                authors = ", ".join(authors)
+            data["Link"].append(result.entry_id)
+            authors = ", ".join(author.name for author in result.authors)
             data["Authors"].append(authors if authors else "Authors not available")
     return data, ""
 
