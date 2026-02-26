@@ -400,53 +400,58 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     for date in days:
         pubmed = PubMed(tool="MyTool", email="your@email.address")
         search_query = f"{date}[PDAT]"
-        try:
-            results = pubmed.query(search_query, max_results=50000)
-        except Exception:
-            continue
-        for article in results:
-            if article.abstract is None:
-                continue
-            abstract = article.abstract.replace("\n", " ")
-            if len(abstract.split()) < 100:
-                continue
-            data["Title"].append(article.title)
-            data["Abstract"].append(abstract)
+        for attempt in range(3):
             try:
-                data["Journal"].append(article.journal.strip().replace("\n", " "))
-            except (AttributeError, TypeError):
-                data["Journal"].append("Journal not found")
-            # Prefer DOI link, fallback to PubMed link
-            doi = getattr(article, "doi", None)
-            pubmed_id = getattr(article, "pubmed_id", None)
-            if doi:
-                # DOI may contain newlines, clean it
-                doi = str(doi).strip().split("\n")[0]
-                data["Link"].append(f"https://doi.org/{doi}")
-            elif pubmed_id:
-                # Use first PMID if multiple
-                pmid = str(pubmed_id).strip().split("\n")[0]
-                data["Link"].append(f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
-            else:
-                data["Link"].append("")
-            # Extract authors
-            authors = getattr(article, "authors", None)
-            if authors and isinstance(authors, list):
-                author_names = []
-                for a in authors:
-                    if isinstance(a, dict):
-                        firstname = a.get("firstname", "") or ""
-                        lastname = a.get("lastname", "") or ""
-                        name = f"{firstname} {lastname}".strip()
-                        if name:
-                            author_names.append(name)
-                    elif isinstance(a, str):
-                        author_names.append(a)
-                data["Authors"].append(
-                    ", ".join(author_names) if author_names else "Authors not available"
-                )
-            else:
-                data["Authors"].append("Authors not available")
+                results = pubmed.query(search_query, max_results=50000)
+                for article in results:
+                    if article.abstract is None:
+                        continue
+                    abstract = article.abstract.replace("\n", " ")
+                    if len(abstract.split()) < 100:
+                        continue
+                    data["Title"].append(article.title)
+                    data["Abstract"].append(abstract)
+                    try:
+                        data["Journal"].append(article.journal.strip().replace("\n", " "))
+                    except (AttributeError, TypeError):
+                        data["Journal"].append("Journal not found")
+                    # Prefer DOI link, fallback to PubMed link
+                    doi = getattr(article, "doi", None)
+                    pubmed_id = getattr(article, "pubmed_id", None)
+                    if doi:
+                        # DOI may contain newlines, clean it
+                        doi = str(doi).strip().split("\n")[0]
+                        data["Link"].append(f"https://doi.org/{doi}")
+                    elif pubmed_id:
+                        # Use first PMID if multiple
+                        pmid = str(pubmed_id).strip().split("\n")[0]
+                        data["Link"].append(f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
+                    else:
+                        data["Link"].append("")
+                    # Extract authors
+                    authors = getattr(article, "authors", None)
+                    if authors and isinstance(authors, list):
+                        author_names = []
+                        for a in authors:
+                            if isinstance(a, dict):
+                                firstname = a.get("firstname", "") or ""
+                                lastname = a.get("lastname", "") or ""
+                                name = f"{firstname} {lastname}".strip()
+                                if name:
+                                    author_names.append(name)
+                            elif isinstance(a, str):
+                                author_names.append(a)
+                        data["Authors"].append(
+                            ", ".join(author_names) if author_names else "Authors not available"
+                        )
+                    else:
+                        data["Authors"].append("Authors not available")
+                break  # Successful query and iteration
+            except requests.exceptions.ConnectionError:
+                if attempt < 2:
+                    time.sleep(2 ** (attempt + 1))  # 2s, then 4s
+            except Exception:
+                break  # Non-connection error, skip this date
     return data, ""
 
 
