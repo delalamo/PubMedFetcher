@@ -60,22 +60,28 @@ def format_date(date, sep: str = "/") -> str:
 
 
 async def classify_paper(
-    client: AsyncOpenAI, title: str, abstract: str, keywords: list[str]
+    client: AsyncOpenAI, title: str, abstract: str, keywords: list[str],
+    model: str = "gpt-5-nano",
 ) -> bool:
-    """Classify a paper as relevant or not using gpt-5-nano.
+    """Classify a paper as relevant or not using the specified model.
 
     Args:
         client: An instance of the async OpenAI client.
         title: The paper title.
         abstract: The paper abstract.
         keywords: List of keyword phrases defining research interests.
+        model: The OpenAI model to use for classification.
 
     Returns:
         True if the paper is classified as relevant, False otherwise.
     """
     keywords_str = "\n".join(f"- {kw}" for kw in keywords)
+    # gpt-4o-mini uses max_tokens; gpt-5-nano uses max_completion_tokens
+    token_kwarg = (
+        {"max_tokens": 10} if model == "gpt-4o-mini" else {"max_completion_tokens": 10}
+    )
     response = await client.chat.completions.create(
-        model="gpt-5-nano",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -96,7 +102,7 @@ async def classify_paper(
                 ),
             },
         ],
-        max_completion_tokens=10,
+        **token_kwarg,
     )
     if not response.choices:
         return False
@@ -110,8 +116,9 @@ def classify_papers(
     keywords: list[str],
     test_mode: bool = False,
     batch_size: int = 20,
+    model: str = "gpt-5-nano",
 ) -> list[dict]:
-    """Classify papers using gpt-5-nano and return relevant ones.
+    """Classify papers using the specified model and return relevant ones.
 
     Sends requests in concurrent batches for speed.
 
@@ -121,6 +128,7 @@ def classify_papers(
         keywords: List of keyword phrases defining research interests.
         test_mode: If True, stop after finding 5 relevant papers.
         batch_size: Number of concurrent classification requests per batch.
+        model: The OpenAI model to use for classification.
 
     Returns:
         A list of dicts, each representing a relevant paper.
@@ -151,7 +159,7 @@ def classify_papers(
             batch = candidates[i : i + batch_size]
             results = await asyncio.gather(
                 *[
-                    classify_paper(async_client, p["Title"], p["Abstract"], keywords)
+                    classify_paper(async_client, p["Title"], p["Abstract"], keywords, model=model)
                     for p in batch
                 ]
             )
@@ -250,19 +258,20 @@ def create_github_issue(
         return False
 
 
-def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
+def summarize_abstract(client: OpenAI, title: str, abstract: str, model: str = "gpt-5-nano") -> str:
     """Summarize an abstract into a single sentence using the OpenAI API.
 
     Args:
         client: An instance of the OpenAI client.
         title: The paper title.
         abstract: The abstract text to summarize.
+        model: The OpenAI model to use for summarization.
 
     Returns:
         A concise summary of the abstract.
     """
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -455,13 +464,14 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False) -> None:
-    """Scrapes papers, classifies them with gpt-5-nano, creates GitHub issues,
+def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> None:
+    """Scrapes papers, classifies them with the specified model, creates GitHub issues,
     and sends an email digest.
 
     Args:
         n_days: The number of days to look back.
         test_mode: If True, stop after finding 5 relevant papers.
+        model: The OpenAI model to use for classification and summarization.
     """
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -490,8 +500,8 @@ def main(n_days: int, test_mode: bool = False) -> None:
         for field in data:
             data[field].extend(d[field])
 
-    print(f"Classifying {len(data['Title'])} papers with gpt-5-nano...")
-    relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode)
+    print(f"Classifying {len(data['Title'])} papers with {model}...")
+    relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode, model=model)
     print(f"Found {len(relevant_papers)} relevant papers")
 
     # Create GitHub issues for relevant papers
@@ -536,7 +546,7 @@ def main(n_days: int, test_mode: bool = False) -> None:
         authors = paper["Authors"]
         # Stagger summarization calls to avoid hitting the TPM rate limit
         time.sleep(2)
-        summary = summarize_abstract(client, title, abstract)
+        summary = summarize_abstract(client, title, abstract, model=model)
         # Add link to title if available
         if link:
             body += f"### [{title}]({link})\n\n"
