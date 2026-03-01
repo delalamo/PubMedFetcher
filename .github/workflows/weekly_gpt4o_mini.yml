@@ -1,0 +1,41 @@
+name: Run weekly fetch with gpt-4o-mini
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  run-clock:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libxml build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run fetching and classification (previous week, gpt-4o-mini)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MY_EMAIL: ${{ secrets.MY_EMAIL }}
+          MY_PW: ${{ secrets.MY_PW }}
+          MY_EMAIL_2: ${{ secrets.MY_EMAIL_2 }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python -c "from run import main; main(7, test_mode=False, model='gpt-4o-mini')"
