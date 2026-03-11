@@ -1,7 +1,10 @@
 arxiv
 markdown
+numpy
 openai
+pandas
 paperscraper
 pymed
 python-dotenv
 requests
+scikit-learn
