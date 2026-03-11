@@ -148,7 +148,7 @@ def scrape_arxiv(
     start = (datetime.now() - timedelta(days=n_days + 1)).strftime("%Y%m%d")
     end = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
-    client = arxiv.Client()
+    client = arxiv.Client(delay_seconds=5.0, num_retries=5)
     for cat in categories:
         query = f"cat:{cat} AND submittedDate:[{start}0000 TO {end}2359]"
         search = arxiv.Search(
@@ -157,13 +157,28 @@ def scrape_arxiv(
             sort_by=arxiv.SortCriterion.SubmittedDate,
             sort_order=arxiv.SortOrder.Descending,
         )
-        for result in client.results(search):
-            data["Title"].append(result.title)
-            data["Abstract"].append(result.summary.replace("\n", " "))
-            data["Journal"].append("arXiv")
-            data["Link"].append(result.entry_id)
-            authors = ", ".join(author.name for author in result.authors)
-            data["Authors"].append(authors if authors else "Authors not available")
+        retries = 0
+        max_retries = 5
+        while retries <= max_retries:
+            try:
+                for result in client.results(search):
+                    data["Title"].append(result.title)
+                    data["Abstract"].append(result.summary.replace("\n", " "))
+                    data["Journal"].append("arXiv")
+                    data["Link"].append(result.entry_id)
+                    authors = ", ".join(author.name for author in result.authors)
+                    data["Authors"].append(authors if authors else "Authors not available")
+                break
+            except arxiv.HTTPError as e:
+                if e.status == 429 and retries < max_retries:
+                    wait = 60 * (2 ** retries)
+                    print(f"arXiv rate limit hit for category {cat}, waiting {wait}s before retry {retries + 1}/{max_retries}...")
+                    time.sleep(wait)
+                    retries += 1
+                else:
+                    raise
+        if cat != categories[-1]:
+            time.sleep(10)
     return data, ""
 
 
