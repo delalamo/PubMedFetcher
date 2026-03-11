@@ -1,7 +1,6 @@
-import asyncio
-import contextlib
 import json
 import os
+import pickle
 import smtplib
 import time
 from datetime import datetime, timedelta
@@ -10,27 +9,16 @@ from email.mime.text import MIMEText
 
 import arxiv
 import markdown
+import numpy as np
+import pandas as pd
 import requests
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+from openai import OpenAI
 from paperscraper.get_dumps import biorxiv, chemrxiv, medrxiv
 from pymed import PubMed
 
 # Load environment variables
 load_dotenv()
-
-
-def load_keywords(filepath: str = "keywords.txt") -> list[str]:
-    """Load keywords from a newline-delimited file.
-
-    Args:
-        filepath: Path to the keywords file. One keyword/phrase per line.
-
-    Returns:
-        A list of keyword strings.
-    """
-    with open(filepath) as f:
-        return [line.strip() for line in f if line.strip()]
 
 
 def openai_summary_prompt() -> str:
@@ -59,219 +47,72 @@ def format_date(date, sep: str = "/") -> str:
     return sep.join([date.strftime(f"%{x}") for x in "Ymd"])
 
 
-async def classify_paper(
-    client: AsyncOpenAI, title: str, abstract: str, keywords: list[str],
-    model: str = "gpt-5-nano",
-) -> bool:
-    """Classify a paper as relevant or not using the specified model.
+def embed_papers(
+    client: OpenAI, data: dict[str, list], cutoff=0.35, test_mode: bool = False
+) -> pd.DataFrame:
+    """Embeds papers using OpenAI's API and filters them by relevance.
 
     Args:
-        client: An instance of the async OpenAI client.
-        title: The paper title.
-        abstract: The paper abstract.
-        keywords: List of keyword phrases defining research interests.
-        model: The OpenAI model to use for classification.
-
-    Returns:
-        True if the paper is classified as relevant, False otherwise.
-    """
-    keywords_str = "\n".join(f"- {kw}" for kw in keywords)
-    # gpt-4o-mini uses max_tokens; gpt-5-nano uses max_completion_tokens
-    token_kwarg = (
-        {"max_tokens": 10} if model == "gpt-4o-mini" else {"max_completion_tokens": 10}
-    )
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a scientific paper classifier. Given a paper's title and abstract, "
-                    "and a list of research topics/keywords, determine if the paper is relevant to "
-                    "any of the listed topics. A paper is relevant if its primary focus or a major "
-                    "contribution relates to one or more of the topics. Respond with ONLY the word "
-                    "'relevant' or 'not relevant'. Do not include any other text."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Research topics/keywords:\n{keywords_str}\n\n"
-                    f"Paper title: {title}\n\n"
-                    f"Paper abstract: {abstract}"
-                ),
-            },
-        ],
-        **token_kwarg,
-    )
-    if not response.choices:
-        return False
-    result = response.choices[0].message.content.strip().lower()
-    return "not relevant" not in result and "relevant" in result
-
-
-def classify_papers(
-    async_client: AsyncOpenAI,
-    data: dict[str, list],
-    keywords: list[str],
-    test_mode: bool = False,
-    batch_size: int = 20,
-    model: str = "gpt-5-nano",
-) -> list[dict]:
-    """Classify papers using the specified model and return relevant ones.
-
-    Sends requests in concurrent batches for speed.
-
-    Args:
-        async_client: An instance of the async OpenAI client.
-        data: A dictionary containing paper data (Title, Abstract, Journal, Link, Authors).
-        keywords: List of keyword phrases defining research interests.
+        client: An instance of the OpenAI client.
+        data: A dictionary containing paper titles, abstracts, journals, links, and authors.
+        cutoff: The minimum relevance score for a paper to be included.
         test_mode: If True, stop after finding 5 relevant papers.
-        batch_size: Number of concurrent classification requests per batch.
-        model: The OpenAI model to use for classification.
 
     Returns:
-        A list of dicts, each representing a relevant paper.
+        A Pandas DataFrame with relevant papers, sorted by relevance.
     """
+    with open("model_openai.pkl", "rb") as f:
+        clf = pickle.load(f)
 
-    async def _classify_all() -> list[dict]:
-        # Collect papers that pass the word-count filter
-        candidates = []
-        links = data.get("Link", [""] * len(data["Title"]))
-        authors_list = data.get("Authors", [""] * len(data["Title"]))
-        for title, abstract, journal, link, authors in zip(
-            data["Title"], data["Abstract"], data["Journal"], links, authors_list
-        ):
-            if len(abstract.split()) < 100:
-                continue
-            candidates.append(
-                {
-                    "Title": title,
-                    "Abstract": abstract,
-                    "Journal": journal,
-                    "Link": link,
-                    "Authors": authors,
-                }
+    analyzed_data = {"Title": [], "Abstract": [], "Journal": [], "Link": [], "Authors": [], "Relevance": []}
+    prompts = []
+    links = data.get("Link", [""] * len(data["Title"]))
+    authors_list = data.get("Authors", [""] * len(data["Title"]))
+    for i, (title, abstract, journal, link, authors) in enumerate(
+        zip(data["Title"], data["Abstract"], data["Journal"], links, authors_list)
+    ):
+        if len(abstract.split()) < 100:
+            continue
+        prompts.append((abstract, title, journal, link, authors))
+
+        if len(prompts) >= 100 or i == len(data["Title"]) - 1:
+            abstracts = [p[0] for p in prompts]
+            response = client.embeddings.create(
+                input=abstracts, model="text-embedding-3-small"
             )
-
-        relevant = []
-        for i in range(0, len(candidates), batch_size):
-            batch = candidates[i : i + batch_size]
-            results = await asyncio.gather(
-                *[
-                    classify_paper(async_client, p["Title"], p["Abstract"], keywords, model=model)
-                    for p in batch
-                ]
-            )
-            for paper, is_relevant in zip(batch, results):
-                if is_relevant:
-                    relevant.append(paper)
-            if test_mode and len(relevant) >= 5:
-                return relevant[:5]
-            # Stagger batches to avoid hitting the TPM rate limit
-            if i + batch_size < len(candidates):
-                await asyncio.sleep(5)
-        return relevant
-
-    return asyncio.run(_classify_all())
+            for p, d in zip(prompts, response.data):
+                prob = clf.predict_proba(np.asarray(d.embedding[:512]).reshape(1, -1))
+                prob = prob[:, 1].item()
+                if prob < cutoff:
+                    continue
+                analyzed_data["Title"].append(p[1])
+                analyzed_data["Abstract"].append(p[0])
+                analyzed_data["Journal"].append(p[2])
+                analyzed_data["Link"].append(p[3])
+                analyzed_data["Authors"].append(p[4])
+                analyzed_data["Relevance"].append(prob)
+            prompts = []
+        if test_mode and len(analyzed_data["Title"]) >= 5:
+            break
+    df = pd.DataFrame.from_dict(analyzed_data)
+    df = df.sort_values("Relevance", ascending=False)
+    df = df[df["Relevance"] >= cutoff]
+    return df
 
 
-def ensure_github_label() -> None:
-    """Ensure the 'paper' label exists in the GitHub repository."""
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    if not token or not repo:
-        return
-    url = f"https://api.github.com/repos/{repo}/labels"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    # Attempt to create; ignore errors if label already exists
-    with contextlib.suppress(Exception):
-        requests.post(
-            url,
-            headers=headers,
-            json={
-                "name": "paper",
-                "color": "0075ca",
-                "description": "Relevant paper identified by PubMedFetcher",
-            },
-            timeout=30,
-        )
-
-
-def create_github_issue(
-    title: str,
-    abstract: str,
-    authors: str,
-    journal: str,
-    link: str,
-) -> bool:
-    """Create a GitHub issue for a relevant paper.
-
-    Args:
-        title: The paper title.
-        abstract: The paper abstract.
-        authors: Comma-separated list of authors.
-        journal: The venue/journal name.
-        link: URL to the paper (DOI or preprint link).
-
-    Returns:
-        True if the issue was created successfully, False otherwise.
-    """
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    if not token or not repo:
-        print("GITHUB_TOKEN or GITHUB_REPOSITORY not set, skipping issue creation")
-        return False
-
-    body = f"**Authors**: {authors}\n\n"
-    body += f"**Venue**: {journal}\n\n"
-    if link:
-        body += f"**Link**: {link}\n\n"
-    body += f"### Abstract\n\n{abstract}\n"
-
-    url = f"https://api.github.com/repos/{repo}/issues"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    payload = {"title": title, "body": body, "labels": ["paper"]}
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        return True
-    except requests.exceptions.HTTPError:
-        # Retry without labels in case label doesn't exist
-        payload.pop("labels", None)
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-            resp.raise_for_status()
-            return True
-        except Exception as e:
-            print(f"Failed to create issue for '{title}': {e}")
-            return False
-    except Exception as e:
-        print(f"Failed to create issue for '{title}': {e}")
-        return False
-
-
-def summarize_abstract(client: OpenAI, title: str, abstract: str, model: str = "gpt-5-nano") -> str:
+def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
     """Summarize an abstract into a single sentence using the OpenAI API.
 
     Args:
         client: An instance of the OpenAI client.
         title: The paper title.
         abstract: The abstract text to summarize.
-        model: The OpenAI model to use for summarization.
 
     Returns:
         A concise summary of the abstract.
     """
     response = client.chat.completions.create(
-        model=model,
+        model="gpt-5-nano",
         messages=[
             {
                 "role": "system",
@@ -374,13 +215,11 @@ def scrape_biorxiv(n_days: int) -> tuple[dict[str, list], list[str]]:
                 data["Title"].append(entry["title"])
                 data["Abstract"].append(entry["abstract"].replace("\n", " "))
                 data["Journal"].append(jsonfile.split(".")[0])
-                # Construct DOI link if available
                 doi = entry.get("doi", "")
                 if doi:
                     data["Link"].append(f"https://doi.org/{doi}")
                 else:
                     data["Link"].append("")
-                # Extract authors
                 authors = entry.get("authors", "")
                 if isinstance(authors, list):
                     authors = ", ".join(authors)
@@ -424,20 +263,16 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
                         data["Journal"].append(article.journal.strip().replace("\n", " "))
                     except (AttributeError, TypeError):
                         data["Journal"].append("Journal not found")
-                    # Prefer DOI link, fallback to PubMed link
                     doi = getattr(article, "doi", None)
                     pubmed_id = getattr(article, "pubmed_id", None)
                     if doi:
-                        # DOI may contain newlines, clean it
                         doi = str(doi).strip().split("\n")[0]
                         data["Link"].append(f"https://doi.org/{doi}")
                     elif pubmed_id:
-                        # Use first PMID if multiple
                         pmid = str(pubmed_id).strip().split("\n")[0]
                         data["Link"].append(f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
                     else:
                         data["Link"].append("")
-                    # Extract authors
                     authors = getattr(article, "authors", None)
                     if authors and isinstance(authors, list):
                         author_names = []
@@ -455,7 +290,7 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
                         )
                     else:
                         data["Authors"].append("Authors not available")
-                break  # Successful query and iteration
+                break  # Successful query
             except requests.exceptions.ConnectionError:
                 if attempt < 2:
                     time.sleep(2 ** (attempt + 1))  # 2s, then 4s
@@ -464,19 +299,16 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> None:
-    """Scrapes papers, classifies them with the specified model, creates GitHub issues,
-    and sends an email digest.
+def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
+    """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
 
     Args:
         n_days: The number of days to look back.
         test_mode: If True, stop after finding 5 relevant papers.
-        model: The OpenAI model to use for classification and summarization.
+        cutoff: The minimum relevance score (out of 10) for a paper to be included.
     """
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    client = OpenAI(api_key=api_key)
-    async_client = AsyncOpenAI(api_key=api_key)
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     env_vars_set = {
         x: bool(os.environ.get(x)) for x in ["MY_EMAIL", "MY_PW", "OPENAI_API_KEY"]
@@ -487,10 +319,6 @@ def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> Non
         msg2 = ", ".join([k for k, v in env_vars_set.items() if not v])
         raise ValueError(msg1 + msg2)
 
-    # Load keywords from file
-    keywords = load_keywords()
-    print(f"Loaded {len(keywords)} keywords")
-
     data_pubmed, _ = scrape_pubmed(n_days)
     data_biorxiv, biorxiv_errors = scrape_biorxiv(n_days)
     data_arxiv, _ = scrape_arxiv(n_days)
@@ -500,20 +328,7 @@ def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> Non
         for field in data:
             data[field].extend(d[field])
 
-    print(f"Classifying {len(data['Title'])} papers with {model}...")
-    relevant_papers = classify_papers(async_client, data, keywords, test_mode=test_mode, model=model)
-    print(f"Found {len(relevant_papers)} relevant papers")
-
-    # Create GitHub issues for relevant papers
-    ensure_github_label()
-    for paper in relevant_papers:
-        create_github_issue(
-            paper["Title"],
-            paper["Abstract"],
-            paper["Authors"],
-            paper["Journal"],
-            paper["Link"],
-        )
+    df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
 
     # Build recipient list - include second email if configured
     recipients = [os.environ.get("MY_EMAIL")]
@@ -530,7 +345,7 @@ def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> Non
     n_biorxiv = len(data_biorxiv["Title"])
     n_total = n_arxiv + n_pubmed + n_biorxiv
     body = f"*Fetched {n_total} papers ({n_arxiv} from Arxiv, {n_pubmed} from PubMed, and {n_biorxiv} from Biorxiv/Chemrxiv/Medrxiv)*\n\n"
-    body += f"*Found {len(relevant_papers)} relevant papers.*\n\n"
+    body += f"*Found {len(df)} relevant papers with cutoff {cutoff / 10:.2f}.*\n\n"
     if len(biorxiv_errors) > 0:
         body += "*The following errors were encountered while scraping biorxiv/medrxiv/chemrxiv:*\n"
         for err in biorxiv_errors:
@@ -538,22 +353,21 @@ def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> Non
         body += "\n"
     body += "---\n\n"
 
-    for paper in relevant_papers:
-        title = paper["Title"]
-        abstract = paper["Abstract"]
-        journal = paper["Journal"]
-        link = paper["Link"]
-        authors = paper["Authors"]
-        # Stagger summarization calls to avoid hitting the TPM rate limit
-        time.sleep(2)
-        summary = summarize_abstract(client, title, abstract, model=model)
-        # Add link to title if available
+    for _, row in df.iterrows():
+        title = row["Title"]
+        abstract = row["Abstract"]
+        journal = row["Journal"]
+        link = row["Link"]
+        authors = row["Authors"]
+        prob = row["Relevance"]
+        summary = summarize_abstract(client, title, abstract)
         if link:
             body += f"### [{title}]({link})\n\n"
         else:
             body += f"### {title}\n\n"
         body += f"**Authors**: {authors}\n\n"
         body += f"**Venue**: {journal}\n\n"
+        body += f"**Relevance**: {(10*prob):.2f}/10\n\n"
         body += f"**Summary**: {summary}\n\n"
         body += f"**Abstract**: {abstract}\n\n---\n\n"
 
@@ -562,4 +376,6 @@ def main(n_days: int, test_mode: bool = False, model: str = "gpt-5-nano") -> Non
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.environ.get("MY_EMAIL"), os.environ.get("MY_PW"))
-        server.sendmail(os.environ.get("MY_EMAIL"), recipients, message.as_string())
+        server.sendmail(
+            os.environ.get("MY_EMAIL"), recipients, message.as_string()
+        )
