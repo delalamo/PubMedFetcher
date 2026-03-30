@@ -100,19 +100,20 @@ def embed_papers(
     return df
 
 
-def summarize_abstract(client: OpenAI, title: str, abstract: str) -> str:
+def summarize_abstract(client: OpenAI, title: str, abstract: str, model: str = "gpt-5-nano") -> str:
     """Summarize an abstract into a single sentence using the OpenAI API.
 
     Args:
         client: An instance of the OpenAI client.
         title: The paper title.
         abstract: The abstract text to summarize.
+        model: The OpenAI model to use for summarization.
 
     Returns:
         A concise summary of the abstract.
     """
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -314,13 +315,14 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
+def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5, model: str = "gpt-5-nano") -> None:
     """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
 
     Args:
         n_days: The number of days to look back.
         test_mode: If True, stop after finding 5 relevant papers.
         cutoff: The minimum relevance score (out of 10) for a paper to be included.
+        model: The OpenAI model to use for summarization.
     """
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -375,7 +377,7 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5) -> None:
         link = row["Link"]
         authors = row["Authors"]
         prob = row["Relevance"]
-        summary = summarize_abstract(client, title, abstract)
+        summary = summarize_abstract(client, title, abstract, model=model)
         if link:
             body += f"### [{title}]({link})\n\n"
         else:
