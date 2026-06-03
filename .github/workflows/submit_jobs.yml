@@ -41,3 +41,4 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python -c "from run import main; main(1, test_mode=False)"
+
