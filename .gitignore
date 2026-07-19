@@ -10,6 +10,8 @@ __pycache__/
 
 # Runtime artifacts
 *.jsonl
+.cache/
+specter2-reports/
 
 # OS
 .DS_Store

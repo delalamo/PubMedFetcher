@@ -1,0 +1,43 @@
+{
+  "description": "Frozen metadata from openly licensed papers; abstracts are short paraphrases written for this fixture.",
+  "papers": [
+    {
+      "work_id": "doi:10.1093/bioinformatics/btp163",
+      "title": "Biopython: freely available Python tools for computational molecular biology and bioinformatics",
+      "abstract": "Biopython provides reusable Python modules for biological sequence analysis, file parsing, database access, and common bioinformatics workflows.",
+      "authors": ["Peter J. A. Cock", "Tiago Antao", "Jeffrey T. Chang"],
+      "source": "open-access fixture",
+      "publication_date": "2009",
+      "year": 2009,
+      "doi": "10.1093/bioinformatics/btp163",
+      "source_id": "PMC2682512",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2682512/",
+      "license": "CC BY 2.0"
+    },
+    {
+      "work_id": "doi:10.1093/bioinformatics/btp352",
+      "title": "The Sequence Alignment/Map format and SAMtools",
+      "abstract": "The SAM format and SAMtools support storage, manipulation, indexing, and analysis of high-throughput nucleotide sequence alignments.",
+      "authors": ["Heng Li", "Bob Handsaker", "Alec Wysoker"],
+      "source": "open-access fixture",
+      "publication_date": "2009",
+      "year": 2009,
+      "doi": "10.1093/bioinformatics/btp352",
+      "source_id": "PMC2723002",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2723002/",
+      "license": "open access"
+    },
+    {
+      "work_id": "jmlr:pedregosa2011",
+      "title": "Scikit-learn: Machine Learning in Python",
+      "abstract": "Scikit-learn is a Python library that exposes efficient supervised and unsupervised learning algorithms through a consistent programming interface.",
+      "authors": ["Fabian Pedregosa", "Gael Varoquaux", "Alexandre Gramfort"],
+      "source": "open-access fixture",
+      "publication_date": "2011",
+      "year": 2011,
+      "source_id": "JMLR-12-2825",
+      "url": "https://jmlr.org/papers/v12/pedregosa11a.html",
+      "license": "CC BY 3.0"
+    }
+  ]
+}

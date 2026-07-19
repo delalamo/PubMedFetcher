@@ -79,3 +79,35 @@ You can also run the pipeline locally by setting the required environment variab
 from run import main
 main(1, test_mode=True)
 ```
+
+## Experimental local SPECTER2 ranking
+
+The manually triggered **Test SPECTER2 paper ranking** workflow evaluates a
+separate, local-embedding ranking path without changing the daily pipeline. It
+uses a pinned copy of the SKM bibliography as weak positive-interest examples,
+embeds papers on the GitHub runner's CPU, and ranks candidates by their mean
+similarity to the five nearest distinct bibliography works.
+
+The workflow has `backtest` and `live` modes. Backtests compare 2025–2026
+bibliography holdouts with a cached deterministic 3:1 background-control
+snapshot; live tests query Europe PMC and the official arXiv API. Controls mean
+only “not present in the bibliography”—they are not guaranteed irrelevant.
+
+No OpenAI key, email secret, or issue permission is used. Each run writes the
+top results and diagnostics to the job summary and uploads complete CSV, JSON,
+and Markdown reports. Scores are relative similarities rather than
+probabilities, and this evaluation does not apply a relevance threshold.
+
+For local development with Python 3.11, install the CPU-only PyTorch wheel and
+the isolated requirements before running the tests or CLI:
+
+```bash
+python -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-specter.txt
+python -m pytest -q tests/test_specter_rank.py
+python specter_rank.py --mode backtest
+```
+
+Reference abstracts and embeddings are cached under `.cache/specter2` and are
+not committed. The immutable SKM, model, and adapter revisions are recorded in
+every report.
