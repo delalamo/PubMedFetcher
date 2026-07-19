@@ -101,10 +101,10 @@ jobs:
             rebuild_args+=(--rebuild-reference-cache)
           fi
           python specter_rank.py \
-            --mode "${{ inputs.mode }}" \
-            --lookback-days "${{ inputs.lookback_days }}" \
-            --max-candidates "${{ inputs.max_candidates }}" \
-            --top-n "${{ inputs.top_n }}" \
+            --mode "${{ inputs.mode || 'backtest' }}" \
+            --lookback-days "${{ inputs.lookback_days || 7 }}" \
+            --max-candidates "${{ inputs.max_candidates || 300 }}" \
+            --top-n "${{ inputs.top_n || 25 }}" \
             --cache-dir "${SPECTER2_CACHE_DIR}" \
             --output-dir specter2-reports \
             --actions-cache-hit "${{ steps.reference-cache.outputs.cache-hit }}" \
@@ -124,7 +124,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: specter2-${{ inputs.mode }}-${{ github.run_id }}
+          name: specter2-${{ inputs.mode || 'backtest' }}-${{ github.run_id }}
           path: specter2-reports/
           if-no-files-found: warn
           retention-days: 30
