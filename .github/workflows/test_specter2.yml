@@ -1,11 +1,6 @@
 name: Test SPECTER2 paper ranking
 
 on:
-  # Temporary branch trigger used only to validate this new workflow before it
-  # exists on the default branch. Removed after the GitHub-hosted test passes.
-  push:
-    branches:
-      - codex/specter2-evaluation
   workflow_dispatch:
     inputs:
       mode:
