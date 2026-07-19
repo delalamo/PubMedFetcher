@@ -80,13 +80,21 @@ from run import main
 main(1, test_mode=True)
 ```
 
-## Experimental local SPECTER2 ranking
+## Local SPECTER2 ranking
 
-The manually triggered **Test SPECTER2 paper ranking** workflow evaluates a
-separate, local-embedding ranking path without changing the daily pipeline. It
-uses a pinned copy of the SKM bibliography as weak positive-interest examples,
-embeds papers on the GitHub runner's CPU, and ranks candidates by their mean
-similarity to the five nearest distinct bibliography works.
+The scheduled **Run daily fetch with SPECTER2** workflow now uses local
+SPECTER2 embeddings for relevance ranking. It leaves the existing retrieval,
+OpenAI abstract summaries, email formatting, recipients, and SMTP delivery
+unchanged. The 25 highest-ranked papers above the existing numeric cutoff are
+passed into that downstream pipeline. The other manual and weekly workflows
+continue to use the existing OpenAI embedding classifier unless they explicitly
+select the SPECTER2 backend.
+
+Both the daily workflow and the manually triggered **Test SPECTER2 paper
+ranking** workflow use a pinned copy of the SKM bibliography as weak
+positive-interest examples. They embed papers on the GitHub runner's CPU and
+rank candidates by their mean similarity to the five nearest distinct
+bibliography works.
 
 The workflow has `backtest` and `live` modes. Backtests compare 2025–2026
 bibliography holdouts with a cached deterministic 3:1 background-control

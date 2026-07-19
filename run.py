@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import arxiv
 import markdown
@@ -98,6 +99,129 @@ def embed_papers(
     df = df.sort_values("Relevance", ascending=False)
     df = df[df["Relevance"] >= cutoff]
     return df
+
+
+def rank_papers_specter2(
+    data: dict[str, list],
+    *,
+    cutoff: float = 0.35,
+    test_mode: bool = False,
+    top_n: int = 25,
+    cache_dir: str | Path = ".cache/specter2-reference-cache",
+    batch_size: int = 8,
+) -> pd.DataFrame:
+    """Rank fetched papers against the pinned SKM bibliography with SPECTER2.
+
+    The returned DataFrame deliberately matches ``embed_papers`` so the email
+    generation and delivery pipeline can consume either relevance backend.
+    Candidate papers retain the existing 100-word minimum abstract rule.
+    """
+    from specter_rank import (
+        Paper,
+        Specter2Embedder,
+        build_http_session,
+        build_ranked_results,
+        calculate_scores,
+        deduplicate_candidates,
+        load_or_build_reference_corpus,
+        load_or_build_reference_embeddings,
+        normalize_arxiv_id,
+        normalize_doi,
+        normalize_title,
+        stable_work_id,
+    )
+
+    columns = ["Title", "Abstract", "Journal", "Link", "Authors", "Relevance"]
+    if top_n < 1:
+        raise ValueError("top_n must be at least 1")
+
+    links = data.get("Link", [""] * len(data["Title"]))
+    authors_list = data.get("Authors", [""] * len(data["Title"]))
+    candidates = []
+    metadata_by_title = {}
+    for title, abstract, journal, link, authors in zip(
+        data["Title"], data["Abstract"], data["Journal"], links, authors_list
+    ):
+        title = str(title or "").strip()
+        abstract = str(abstract or "").strip()
+        if not title or len(abstract.split()) < 100:
+            continue
+        journal = str(journal or "")
+        link = str(link or "")
+        authors = str(authors or "")
+        doi = normalize_doi(link)
+        arxiv_id = normalize_arxiv_id(link)
+        paper = Paper(
+            work_id=stable_work_id(
+                doi=doi,
+                arxiv_id=arxiv_id,
+                source=journal,
+                source_id=arxiv_id,
+                title=title,
+            ),
+            title=title,
+            abstract=abstract,
+            authors=[authors] if authors else [],
+            source=journal,
+            doi=doi,
+            source_id=arxiv_id,
+            url=link,
+        )
+        candidates.append(paper)
+        title_key = normalize_title(title)
+        current = metadata_by_title.get(title_key)
+        if current is None or len(abstract) > len(current["Abstract"]):
+            metadata_by_title[title_key] = {
+                "Title": title,
+                "Abstract": abstract,
+                "Journal": journal,
+                "Link": link,
+                "Authors": authors,
+            }
+
+    if not candidates:
+        return pd.DataFrame(columns=columns)
+
+    candidates = deduplicate_candidates(candidates)
+    cache_path = Path(cache_dir)
+    session = build_http_session()
+    references, _, corpus_cache_hit = load_or_build_reference_corpus(
+        cache_dir=cache_path,
+        session=session,
+        rebuild=False,
+    )
+    embedder = Specter2Embedder(batch_size=batch_size)
+    reference_embeddings, embedding_cache_hit = load_or_build_reference_embeddings(
+        references,
+        cache_dir=cache_path,
+        embedder=embedder,
+        rebuild=False,
+    )
+    candidate_embeddings = embedder.encode(candidates)
+    ranked = build_ranked_results(
+        candidates,
+        calculate_scores(candidate_embeddings, reference_embeddings, references),
+    )
+
+    limit = 5 if test_mode else top_n
+    analyzed_data = {column: [] for column in columns}
+    for result in ranked:
+        score = float(result["score"])
+        if score < cutoff:
+            continue
+        metadata = metadata_by_title[normalize_title(result["title"])]
+        for column in columns[:-1]:
+            analyzed_data[column].append(metadata[column])
+        analyzed_data["Relevance"].append(score)
+        if len(analyzed_data["Title"]) >= limit:
+            break
+
+    print(
+        "SPECTER2 ranked "
+        f"{len(candidates)} distinct candidates against {len(references)} references "
+        f"(corpus cache hit={corpus_cache_hit}, embedding cache hit={embedding_cache_hit})"
+    )
+    return pd.DataFrame(analyzed_data, columns=columns)
 
 
 def summarize_abstract(client: OpenAI, title: str, abstract: str, model: str = "gpt-5-nano") -> str:
@@ -315,7 +439,14 @@ def scrape_pubmed(n_days: int) -> tuple[dict[str, list], str]:
     return data, ""
 
 
-def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5, model: str = "gpt-5-nano") -> None:
+def main(
+    n_days: int,
+    test_mode: bool = False,
+    cutoff: float = 3.5,
+    model: str = "gpt-5-nano",
+    relevance_backend: str = "openai",
+    specter2_top_n: int = 25,
+) -> None:
     """Scrapes papers from PubMed, biorxiv, and arXiv, embeds them, and sends an email.
 
     Args:
@@ -323,6 +454,9 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5, model: str =
         test_mode: If True, stop after finding 5 relevant papers.
         cutoff: The minimum relevance score (out of 10) for a paper to be included.
         model: The OpenAI model to use for summarization.
+        relevance_backend: ``openai`` for the existing classifier or ``specter2``
+            for local nearest-neighbor ranking against the SKM bibliography.
+        specter2_top_n: Maximum papers retained by the SPECTER2 backend.
     """
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -345,7 +479,20 @@ def main(n_days: int, test_mode: bool = False, cutoff: float = 3.5, model: str =
         for field in data:
             data[field].extend(d[field])
 
-    df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
+    if relevance_backend == "specter2":
+        df = rank_papers_specter2(
+            data,
+            test_mode=test_mode,
+            cutoff=cutoff / 10,
+            top_n=specter2_top_n,
+            cache_dir=os.environ.get(
+                "SPECTER2_CACHE_DIR", ".cache/specter2-reference-cache"
+            ),
+        )
+    elif relevance_backend == "openai":
+        df = embed_papers(client, data, test_mode=test_mode, cutoff=cutoff / 10)
+    else:
+        raise ValueError(f"Unknown relevance backend: {relevance_backend}")
 
     # Build recipient list - include second email if configured
     recipients = [os.environ.get("MY_EMAIL")]
