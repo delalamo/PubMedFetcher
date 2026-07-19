@@ -136,6 +136,7 @@ def test_deterministic_tie_order_and_result_fields():
     )
     results = build_ranked_results(candidates, score_set)
     assert [result["work_id"] for result in results] == ["paper:a", "paper:b"]
+    assert results[0]["score"] == 0.5
     assert RESULT_REQUIRED_FIELDS <= set(results[0])
 
 

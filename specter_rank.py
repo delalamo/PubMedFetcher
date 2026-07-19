@@ -46,6 +46,7 @@ SPECTER2_ADAPTER = "allenai/specter2"
 SPECTER2_ADAPTER_REVISION = "2081559630a80fc5851d8f798a05ba81e9468089"
 SCHEMA_VERSION = 1
 CONTROL_SNAPSHOT_VERSION = 1
+REPORT_SIMILARITY_DECIMALS = 4
 DEFAULT_USER_AGENT = (
     "PubMedFetcher-SPECTER2-evaluation/1.0 "
     "(https://github.com/delalamo/PubMedFetcher)"
@@ -1217,6 +1218,12 @@ def _rank_indices(scores: Sequence[float], candidates: Sequence[Paper]) -> list[
     )
 
 
+def report_similarity(value: float) -> float:
+    """Canonicalize insignificant CPU-kernel drift in report-facing scores."""
+
+    return round(float(value), REPORT_SIMILARITY_DECIMALS)
+
+
 def build_ranked_results(
     candidates: Sequence[Paper], score_set: ScoreSet
 ) -> list[dict[str, Any]]:
@@ -1227,7 +1234,7 @@ def build_ranked_results(
         results.append(
             {
                 "rank": rank,
-                "score": float(score_set.top5_mean[index]),
+                "score": report_similarity(score_set.top5_mean[index]),
                 "title": paper.title,
                 "abstract_available": paper.has_abstract,
                 "authors": paper.authors,
@@ -1239,11 +1246,17 @@ def build_ranked_results(
                 "url": paper.url,
                 "label": paper.label,
                 "diagnostic_scores": {
-                    "centroid": float(score_set.centroid[index]),
-                    "single_nearest": float(score_set.top1[index]),
-                    "mean_top_ten": float(score_set.top10_mean[index]),
+                    "centroid": report_similarity(score_set.centroid[index]),
+                    "single_nearest": report_similarity(score_set.top1[index]),
+                    "mean_top_ten": report_similarity(score_set.top10_mean[index]),
                 },
-                "nearest_references": [asdict(neighbor) for neighbor in score_set.neighbors[index]],
+                "nearest_references": [
+                    {
+                        **asdict(neighbor),
+                        "similarity": report_similarity(neighbor.similarity),
+                    }
+                    for neighbor in score_set.neighbors[index]
+                ],
             }
         )
     validate_sorted_results(results)
@@ -1254,8 +1267,8 @@ def validate_sorted_results(results: Sequence[dict[str, Any]]) -> None:
     expected_ranks = list(range(1, len(results) + 1))
     if [result.get("rank") for result in results] != expected_ranks:
         raise OperationalError("Output ranks are malformed")
-    ordering = [(-float(result["score"]), str(result["work_id"])) for result in results]
-    if ordering != sorted(ordering):
+    scores = [float(result["score"]) for result in results]
+    if any(left < right for left, right in zip(scores, scores[1:])):
         raise OperationalError("Output is not deterministically sorted")
 
 
@@ -1673,6 +1686,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             "adapter": SPECTER2_ADAPTER,
             "adapter_revision": SPECTER2_ADAPTER_REVISION,
             "representation": "title + [SEP] + abstract; first token; max 512 tokens; L2 normalized",
+            "report_similarity_decimals": REPORT_SIMILARITY_DECIMALS,
             "device": "cpu",
         },
         "bibliography": {
